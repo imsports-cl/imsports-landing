@@ -1,24 +1,992 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IMSPORTS — Tu grupo deportivo, en otra liga</title>
-  <meta name="description" content="La plataforma donde tu grupo deportivo vive, compite y crece.">
-  <meta property="og:title" content="IMSPORTS — Tu grupo deportivo, en otra liga">
-  <meta property="og:url" content="https://imsports.app">
+  <title>IMSPORTS — Tu grupo deportivo vive, compite y crece</title>
+  <meta name="description" content="La plataforma donde tu grupo deportivo lleva su historial, estadísticas y competencia al siguiente nivel.">
+  <meta property="og:title" content="IMSPORTS — La app de tu grupo deportivo">
+  <meta property="og:description" content="Estadísticas, rankings, convocatorias y más. Todo lo que tu grupo necesita en una app.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://imsports.cl">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
-*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}:root{--n:#39FF14;--nd:#2bcc10;--d:#0a0a0a;--dc:#111;--db:#1a1a1a;--g:#888;--w:#f0f0f0}html{scroll-behavior:smooth}body{font-family:'Inter',-apple-system,sans-serif;background:var(--d);color:var(--w);overflow-x:hidden;-webkit-font-smoothing:antialiased}nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;background:rgba(10,10,10,.8);backdrop-filter:blur(20px);border-bottom:1px solid var(--db)}.logo{font-weight:900;font-size:1.5rem;letter-spacing:-.5px}.logo span{color:var(--n)}.nav-links{display:flex;gap:2rem;align-items:center}.nav-links a{color:var(--g);text-decoration:none;font-size:.9rem;font-weight:500;transition:color .2s}.nav-links a:hover{color:var(--w)}.btn-nav{background:var(--n);color:var(--d);padding:.5rem 1.25rem;border-radius:8px;font-weight:700;font-size:.85rem;text-decoration:none;transition:all .2s}.btn-nav:hover{background:var(--nd);transform:translateY(-1px)}.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:8rem 2rem 4rem;position:relative}.hero::before{content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);width:600px;height:600px;background:radial-gradient(circle,rgba(57,255,20,.08) 0%,transparent 70%);pointer-events:none}.badge{display:inline-flex;align-items:center;gap:.5rem;background:rgba(57,255,20,.08);border:1px solid rgba(57,255,20,.2);padding:.4rem 1rem;border-radius:100px;font-size:.8rem;color:var(--n);font-weight:600;margin-bottom:2rem;animation:pg 3s ease-in-out infinite}@keyframes pg{0%,100%{box-shadow:0 0 0 0 rgba(57,255,20,0)}50%{box-shadow:0 0 20px 0 rgba(57,255,20,.15)}}.hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:900;line-height:1.05;letter-spacing:-2px;max-width:800px;margin-bottom:1.5rem}.hero h1 .hl{background:linear-gradient(135deg,var(--n),#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.hero p{font-size:1.2rem;color:var(--g);max-width:550px;line-height:1.6;margin-bottom:2.5rem}.sb{display:flex;gap:1rem;margin-top:1rem;justify-content:center;flex-wrap:wrap}.st{display:inline-flex;align-items:center;gap:.75rem;background:var(--dc);border:1px solid var(--db);padding:.75rem 1.5rem;border-radius:12px;text-decoration:none;color:var(--w);transition:all .25s}.st:hover{border-color:rgba(57,255,20,.3);transform:translateY(-2px)}.st svg{width:28px;height:28px}.st .tt{text-align:left}.st .tt small{display:block;font-size:.65rem;color:var(--g)}.st .tt strong{display:block;font-size:.95rem;font-weight:700}.ms{padding:2rem 2rem 6rem;display:flex;justify-content:center}.pm{width:280px;height:560px;background:linear-gradient(165deg,#1a1a1a,#111);border-radius:36px;border:2px solid #222;position:relative;overflow:hidden;box-shadow:0 40px 80px rgba(0,0,0,.5),0 0 60px rgba(57,255,20,.05)}.ps{position:absolute;inset:8px;border-radius:28px;background:linear-gradient(180deg,#0d1117,#0a0a0a);overflow:hidden;display:flex;flex-direction:column;padding:2rem 1.25rem}.ps .ah{text-align:center;margin-bottom:1.5rem}.ps .ah h3{font-size:1.1rem;font-weight:800}.ps .ah h3 span{color:var(--n)}.ps .ah p{font-size:.65rem;color:var(--g);margin-top:.25rem}.mc{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:.75rem;margin-bottom:.6rem}.mc-t{font-size:.7rem;font-weight:700;margin-bottom:.25rem}.mc-s{font-size:.6rem;color:var(--g)}.mc-n{color:var(--n);font-weight:700;font-size:.65rem;margin-top:.25rem}.mst{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem;margin-top:.5rem}.ms2{text-align:center;background:rgba(57,255,20,.05);border-radius:8px;padding:.5rem .25rem}.ms2 .num{font-size:1rem;font-weight:800;color:var(--n)}.ms2 .lb{font-size:.5rem;color:var(--g);margin-top:.15rem}.ft{padding:6rem 2rem;max-width:1100px;margin:0 auto}.sl{color:var(--n);font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:2px;margin-bottom:.75rem}.stl{font-size:clamp(2rem,4vw,3rem);font-weight:900;letter-spacing:-1.5px;margin-bottom:1rem}.sd{color:var(--g);font-size:1.1rem;max-width:600px;line-height:1.6;margin-bottom:3.5rem}.fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.25rem}.fc{background:var(--dc);border:1px solid var(--db);border-radius:16px;padding:2rem;transition:all .3s}.fc:hover{border-color:rgba(57,255,20,.15);transform:translateY(-4px)}.fi{width:48px;height:48px;background:rgba(57,255,20,.08);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;margin-bottom:1.25rem}.fc h3{font-size:1.15rem;font-weight:700;margin-bottom:.5rem}.fc p{color:var(--g);font-size:.9rem;line-height:1.6}.hw{padding:6rem 2rem;max-width:1100px;margin:0 auto}.sps{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:2rem;margin-top:3rem}.sp{text-align:center;padding:2rem 1.5rem}.sn{width:56px;height:56px;background:linear-gradient(135deg,var(--n),#00ff88);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:1.25rem;color:var(--d);margin:0 auto 1.25rem}.sp h3{font-size:1.15rem;font-weight:700;margin-bottom:.5rem}.sp p{color:var(--g);font-size:.9rem;line-height:1.6}.cs{padding:6rem 2rem;text-align:center}.cb{max-width:700px;margin:0 auto;background:linear-gradient(165deg,rgba(57,255,20,.06),rgba(57,255,20,.02));border:1px solid rgba(57,255,20,.15);border-radius:24px;padding:4rem 3rem}.cb h2{font-size:clamp(1.8rem,3.5vw,2.5rem);font-weight:900;letter-spacing:-1px;margin-bottom:1rem}.cb p{color:var(--g);font-size:1.05rem;margin-bottom:2rem;line-height:1.6}footer{padding:3rem 2rem;border-top:1px solid var(--db);text-align:center}.fl{font-weight:900;font-size:1.25rem;margin-bottom:.5rem}.fl span{color:var(--n)}footer p{color:var(--g);font-size:.8rem}.flinks{display:flex;gap:1.5rem;justify-content:center;margin-top:1rem}.flinks a{color:var(--g);text-decoration:none;font-size:.8rem;transition:color .2s}.flinks a:hover{color:var(--n)}@media(max-width:768px){nav{padding:.75rem 1rem}.nav-links{display:none}.hero{padding:7rem 1.25rem 3rem}.hero p{font-size:1rem}.ft{padding:4rem 1.25rem}.fg{grid-template-columns:1fr}.hw{padding:4rem 1.25rem}.sps{grid-template-columns:1fr}.cb{padding:2.5rem 1.5rem}.pm{width:240px;height:480px}}.fade-in{opacity:0;transform:translateY(30px);transition:all .6s cubic-bezier(.16,1,.3,1)}.fade-in.visible{opacity:1;transform:translateY(0)}
+    /* ═══════════════════════════════════════════
+       CSS VARIABLES — DUAL THEME
+       ═══════════════════════════════════════════ */
+    :root {
+      --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* DARK MODE (default): Verde + Negro */
+    [data-theme="dark"] {
+      --bg-primary: #0A0A0A;
+      --bg-secondary: #111111;
+      --bg-card: #1A1A1A;
+      --bg-card-hover: #222222;
+      --accent: #00E676;
+      --accent-dim: rgba(0, 230, 118, 0.15);
+      --accent-glow: rgba(0, 230, 118, 0.3);
+      --text-primary: #FFFFFF;
+      --text-secondary: #A0A0A0;
+      --text-muted: #666666;
+      --border: #2A2A2A;
+      --gradient-hero: linear-gradient(135deg, #0A0A0A 0%, #0D1F0D 50%, #0A0A0A 100%);
+      --gradient-accent: linear-gradient(135deg, #00E676, #00C853);
+      --gradient-card: linear-gradient(145deg, #1A1A1A, #111111);
+      --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+      --shadow-accent: 0 0 40px rgba(0, 230, 118, 0.15);
+      --badge-bg: rgba(0, 230, 118, 0.12);
+      --badge-text: #00E676;
+      --cta-text: #0A0A0A;
+      --nav-bg: rgba(10, 10, 10, 0.85);
+    }
+
+    /* LIGHT MODE: Fire Orange */
+    [data-theme="light"] {
+      --bg-primary: #FAFAFA;
+      --bg-secondary: #F0F0F0;
+      --bg-card: #FFFFFF;
+      --bg-card-hover: #FFF5EE;
+      --accent: #FF6B35;
+      --accent-dim: rgba(255, 107, 53, 0.1);
+      --accent-glow: rgba(255, 107, 53, 0.2);
+      --text-primary: #1C1C1E;
+      --text-secondary: #6B6B6B;
+      --text-muted: #999999;
+      --border: #E5E5E5;
+      --gradient-hero: linear-gradient(135deg, #FAFAFA 0%, #FFF5EE 50%, #FAFAFA 100%);
+      --gradient-accent: linear-gradient(135deg, #FF6B35, #FF8F00);
+      --gradient-card: linear-gradient(145deg, #FFFFFF, #F8F8F8);
+      --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.08);
+      --shadow-accent: 0 0 40px rgba(255, 107, 53, 0.15);
+      --badge-bg: rgba(255, 107, 53, 0.1);
+      --badge-text: #FF6B35;
+      --cta-text: #FFFFFF;
+      --nav-bg: rgba(250, 250, 250, 0.85);
+    }
+
+    /* ═══════════════════════════════════════════
+       RESET & BASE
+       ═══════════════════════════════════════════ */
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      transition: background var(--transition), color var(--transition);
+      overflow-x: hidden;
+    }
+
+    a {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    /* ═══════════════════════════════════════════
+       NAVIGATION
+       ═══════════════════════════════════════════ */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 16px 24px;
+      background: var(--nav-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      transition: all var(--transition);
+    }
+
+    .nav-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: -0.5px;
+    }
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: var(--gradient-accent);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .logo-text span {
+      color: var(--accent);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+
+    .nav-links a {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: color var(--transition);
+    }
+
+    .nav-links a:hover {
+      color: var(--accent);
+    }
+
+    .theme-toggle {
+      width: 44px;
+      height: 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      cursor: pointer;
+      position: relative;
+      transition: all var(--transition);
+    }
+
+    .theme-toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      background: var(--accent);
+      border-radius: 50%;
+      transition: transform var(--transition);
+    }
+
+    [data-theme="light"] .theme-toggle::after {
+      transform: translateX(20px);
+    }
+
+    /* ═══════════════════════════════════════════
+       HERO
+       ═══════════════════════════════════════════ */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 120px 24px 80px;
+      background: var(--gradient-hero);
+      position: relative;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px;
+      height: 600px;
+      background: var(--accent-glow);
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      opacity: 0.4;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      max-width: 800px;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: var(--badge-bg);
+      border: 1px solid var(--accent-dim);
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--badge-text);
+      margin-bottom: 32px;
+      animation: fadeInUp 0.6s ease;
+    }
+
+    .hero-badge .dot {
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .hero h1 {
+      font-size: clamp(40px, 8vw, 72px);
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: -2px;
+      margin-bottom: 24px;
+      animation: fadeInUp 0.6s ease 0.1s both;
+    }
+
+    .hero h1 .accent {
+      background: var(--gradient-accent);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      font-size: clamp(16px, 2.5vw, 20px);
+      color: var(--text-secondary);
+      max-width: 560px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+      animation: fadeInUp 0.6s ease 0.2s both;
+    }
+
+    .hero-cta {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+      animation: fadeInUp 0.6s ease 0.3s both;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 32px;
+      background: var(--gradient-accent);
+      color: var(--cta-text);
+      font-weight: 700;
+      font-size: 16px;
+      border-radius: 14px;
+      border: none;
+      cursor: pointer;
+      transition: all var(--transition);
+      box-shadow: var(--shadow-accent);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 40px var(--accent-glow);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 32px;
+      background: var(--bg-card);
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 16px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    /* ═══════════════════════════════════════════
+       STATS BAR
+       ═══════════════════════════════════════════ */
+    .stats-bar {
+      padding: 48px 24px;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stats-grid {
+      max-width: 1000px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 32px;
+      text-align: center;
+    }
+
+    .stat-item .stat-number {
+      font-size: 36px;
+      font-weight: 900;
+      color: var(--accent);
+      letter-spacing: -1px;
+    }
+
+    .stat-item .stat-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* ═══════════════════════════════════════════
+       FEATURES
+       ═══════════════════════════════════════════ */
+    .features {
+      padding: 100px 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 64px;
+    }
+
+    .section-header .tag {
+      display: inline-block;
+      padding: 6px 14px;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: 100px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 16px;
+    }
+
+    .section-header h2 {
+      font-size: clamp(28px, 5vw, 44px);
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1.15;
+    }
+
+    .section-header p {
+      font-size: 17px;
+      color: var(--text-secondary);
+      max-width: 500px;
+      margin: 16px auto 0;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+
+    .feature-card {
+      padding: 36px 28px;
+      background: var(--gradient-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      transition: all var(--transition);
+      box-shadow: var(--shadow-card);
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--accent);
+      background: var(--bg-card-hover);
+      box-shadow: var(--shadow-accent);
+    }
+
+    .feature-icon {
+      width: 56px;
+      height: 56px;
+      background: var(--accent-dim);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin-bottom: 20px;
+    }
+
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      letter-spacing: -0.3px;
+    }
+
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ═══════════════════════════════════════════
+       HOW IT WORKS
+       ═══════════════════════════════════════════ */
+    .how-it-works {
+      padding: 100px 24px;
+      background: var(--bg-secondary);
+    }
+
+    .steps {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .step {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      padding: 32px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      transition: all var(--transition);
+    }
+
+    .step:hover {
+      border-color: var(--accent);
+    }
+
+    .step-number {
+      flex-shrink: 0;
+      width: 48px;
+      height: 48px;
+      background: var(--gradient-accent);
+      color: var(--cta-text);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+    }
+
+    .step h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .step p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ═══════════════════════════════════════════
+       SOCIAL PROOF
+       ═══════════════════════════════════════════ */
+    .social-proof {
+      padding: 100px 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .testimonials-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+
+    .testimonial {
+      padding: 32px;
+      background: var(--gradient-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+    }
+
+    .testimonial-quote {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+      margin-bottom: 20px;
+      font-style: italic;
+    }
+
+    .testimonial-author {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .testimonial-avatar {
+      width: 40px;
+      height: 40px;
+      background: var(--accent-dim);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .testimonial-name {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .testimonial-role {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ═══════════════════════════════════════════
+       CTA FINAL
+       ═══════════════════════════════════════════ */
+    .cta-section {
+      padding: 100px 24px;
+      text-align: center;
+      background: var(--bg-secondary);
+      position: relative;
+    }
+
+    .cta-section::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 500px;
+      height: 500px;
+      background: var(--accent-glow);
+      border-radius: 50%;
+      filter: blur(150px);
+      pointer-events: none;
+      opacity: 0.3;
+    }
+
+    .cta-content {
+      position: relative;
+      z-index: 1;
+    }
+
+    .cta-section h2 {
+      font-size: clamp(28px, 5vw, 48px);
+      font-weight: 900;
+      letter-spacing: -1.5px;
+      margin-bottom: 16px;
+    }
+
+    .cta-section p {
+      font-size: 17px;
+      color: var(--text-secondary);
+      margin-bottom: 40px;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .email-form {
+      display: flex;
+      gap: 12px;
+      max-width: 460px;
+      margin: 0 auto;
+    }
+
+    .email-form input {
+      flex: 1;
+      padding: 16px 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      font-size: 15px;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+
+    .email-form input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .email-form input:focus {
+      border-color: var(--accent);
+    }
+
+    .email-form button {
+      padding: 16px 28px;
+      background: var(--gradient-accent);
+      color: var(--cta-text);
+      font-weight: 700;
+      font-size: 15px;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+    }
+
+    .email-form button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 40px var(--accent-glow);
+    }
+
+    /* ═══════════════════════════════════════════
+       FOOTER
+       ═══════════════════════════════════════════ */
+    footer {
+      padding: 48px 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .footer-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .footer-text {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+
+    .footer-links a {
+      font-size: 13px;
+      color: var(--text-muted);
+      transition: color var(--transition);
+    }
+
+    .footer-links a:hover {
+      color: var(--accent);
+    }
+
+    /* ═══════════════════════════════════════════
+       ANIMATIONS
+       ═══════════════════════════════════════════ */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Scroll reveal */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ═══════════════════════════════════════════
+       RESPONSIVE
+       ═══════════════════════════════════════════ */
+    @media (max-width: 768px) {
+      .nav-links a:not(.theme-toggle-wrapper) {
+        display: none;
+      }
+
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 24px;
+      }
+
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .testimonials-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .step {
+        flex-direction: column;
+      }
+
+      .email-form {
+        flex-direction: column;
+      }
+
+      .footer-inner {
+        flex-direction: column;
+        gap: 16px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .hero-cta {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .btn-primary, .btn-secondary {
+        width: 100%;
+        justify-content: center;
+      }
+    }
   </style>
 </head>
 <body>
-<nav><div class="logo">IM<span>SPORTS</span></div><div class="nav-links"><a href="#features">Features</a><a href="#como-funciona">Como funciona</a><a href="#descargar" class="btn-nav">Descargar</a></div></nav>
-<section class="hero"><div class="badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Proximamente en App Store y Google Play</div><h1>Tu grupo deportivo,<br><span class="hl">en otra liga.</span></h1><p>Organiza partidos, lleva el track record de tu grupo, compite con estadisticas reales y haz que cada encuentro cuente.</p><div class="sb" id="descargar"><a href="#" class="st"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg><div class="tt"><small>Pronto en</small><strong>App Store</strong></div></a><a href="#" class="st"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.609 1.814L13.792 12 3.61 22.186a.996.996 0 0 1-.61-.92V2.734a1 1 0 0 1 .609-.92zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.199l2.302 2.302a1 1 0 0 1 0 1.38l-2.302 2.302L15.396 12l2.302-2.492zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg><div class="tt"><small>Pronto en</small><strong>Google Play</strong></div></a></div></section>
-<section class="ms fade-in"><div class="pm"><div class="ps"><div class="ah"><h3>IM<span>SPORTS</span></h3><p>Tu grupo deportivo</p></div><div class="mc"><div class="mc-t">Futbol Sabado - Los Cracks</div><div class="mc-s">Sabado 29 Mar · 10:00 · Cancha La Reina</div><div class="mc-n">8/10 confirmados</div></div><div class="mc"><div class="mc-t">Padel Mixto - Team Smash</div><div class="mc-s">Domingo 30 Mar · 18:00 · Club Sport</div><div class="mc-n">4/4 confirmados</div></div><div class="mc"><div class="mc-t">Basket After Office</div><div class="mc-s">Lunes 31 Mar · 20:00 · Gym Central</div><div class="mc-n">6/10 confirmados</div></div><div class="mst"><div class="ms2"><div class="num">47</div><div class="lb">Partidos</div></div><div class="ms2"><div class="num">12</div><div class="lb">Victorias</div></div><div class="ms2"><div class="num">23</div><div class="lb">Goles</div></div></div></div></div></section>
-<section class="ft" id="features"><div class="sl fade-in">Features</div><h2 class="stl fade-in">Todo lo que tu grupo necesita.</h2><p class="sd fade-in">Deja el WhatsApp para los memes. IMSPORTS es donde tu grupo deportivo organiza, compite y crece de verdad.</p><div class="fg"><div class="fc fade-in"><div class="fi">📊</div><h3>Estadisticas reales</h3><p>Goles, asistencias, victorias, rachas. El track record completo de cada jugador y grupo, actualizado automaticamente.</p></div><div class="fc fade-in"><div class="fi">⚡</div><h3>Partidos en 60 segundos</h3><p>Crea un partido, invita al grupo, confirma asistencia. Sin el caos de "quien va?" en el chat grupal.</p></div><div class="fc fade-in"><div class="fi">🏆</div><h3>Rankings y ligas</h3><p>Tablas de posiciones dentro de tu grupo. Quien es el goleador, quien tiene mejor racha, quien nunca falta.</p></div><div class="fc fade-in"><div class="fi">👥</div><h3>Grupos y comunidades</h3><p>Crea tu grupo deportivo con admin tools. Perfecto para la pichanga del sabado, la liga de la oficina o el club del barrio.</p></div><div class="fc fade-in"><div class="fi">🎯</div><h3>Gamificacion</h3><p>Badges, streaks, niveles y logros. Porque cada partido jugado y cada gol convertido merecen ser celebrados.</p></div><div class="fc fade-in"><div class="fi">📱</div><h3>Multi-deporte</h3><p>Futbol, padel, tenis, basquet, running y 15+ deportes mas. Un solo lugar para toda tu vida deportiva.</p></div></div></section>
-<section class="hw" id="como-funciona"><div class="sl fade-in">Como funciona</div><h2 class="stl fade-in">Empieza en 3 pasos.</h2><p class="sd fade-in">Tu grupo organizado en minutos, no en horas.</p><div class="sps"><div class="sp fade-in"><div class="sn">1</div><h3>Crea tu grupo</h3><p>Elige el deporte, ponle nombre y comparte el link de invitacion con tu grupo.</p></div><div class="sp fade-in"><div class="sn">2</div><h3>Organiza partidos</h3><p>Define fecha, hora, cancha y cuantos jugadores. El grupo confirma con un tap.</p></div><div class="sp fade-in"><div class="sn">3</div><h3>Juega y compite</h3><p>Registra resultados, acumula estadisticas y sube en el ranking de tu grupo.</p></div></div></section>
-<section class="cs"><div class="cb fade-in"><h2>Tu grupo merece<br>mas que un chat.</h2><p>IMSPORTS llega pronto a App Store y Google Play. Se de los primeros en probarlo.</p><div class="sb"><a href="#" class="st"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg><div class="tt"><small>Pronto en</small><strong>App Store</strong></div></a><a href="#" class="st"><svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28"><path d="M3.609 1.814L13.792 12 3.61 22.186a.996.996 0 0 1-.61-.92V2.734a1 1 0 0 1 .609-.92zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.199l2.302 2.302a1 1 0 0 1 0 1.38l-2.302 2.302L15.396 12l2.302-2.492zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg><div class="tt"><small>Pronto en</small><strong>Google Play</strong></div></a></div></div></section>
-<footer><div class="fl">IM<span>SPORTS</span></div><p>© 2026 IMSPORTS. Todos los derechos reservados.</p><div class="flinks"><a href="mailto:admin@sportslink.cl">Contacto</a><a href="#">Privacidad</a><a href="#">Terminos</a></div></footer>
-<script>const o=new IntersectionObserver(e=>{e.forEach(e=>{e.isIntersecting&&e.target.classList.add('visible')})},{threshold:.1});document.querySelectorAll('.fade-in').forEach(e=>o.observe(e))</script>
-</body></html>
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <a href="#" class="logo">
+        <div class="logo-icon">I'M</div>
+        <div class="logo-text">IM<span>SPORTS</span></div>
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how">Cómo funciona</a>
+        <a href="#join">Únete</a>
+        <div class="theme-toggle-wrapper">
+          <div class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema"></div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        Próximamente en App Store y Google Play
+      </div>
+      <h1>Tu grupo deportivo<br><span class="accent">vive, compite y crece</span></h1>
+      <p>IMSPORTS es la plataforma donde tu grupo lleva su historial, estadísticas, rankings y convocatorias. Todo en un solo lugar.</p>
+      <div class="hero-cta">
+        <a href="#join" class="btn-primary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          Quiero acceso anticipado
+        </a>
+        <a href="#features" class="btn-secondary">
+          Conoce más
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- STATS BAR -->
+  <section class="stats-bar">
+    <div class="stats-grid">
+      <div class="stat-item reveal">
+        <div class="stat-number">83+</div>
+        <div class="stat-label">Partidos registrados</div>
+      </div>
+      <div class="stat-item reveal">
+        <div class="stat-number">32</div>
+        <div class="stat-label">Jugadores activos</div>
+      </div>
+      <div class="stat-item reveal">
+        <div class="stat-number">2,237</div>
+        <div class="stat-label">Participaciones</div>
+      </div>
+      <div class="stat-item reveal">
+        <div class="stat-number">100%</div>
+        <div class="stat-label">Stats verificadas</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <div class="section-header reveal">
+      <div class="tag">Features</div>
+      <h2>Todo lo que tu grupo necesita</h2>
+      <p>Dejá el Excel y el grupo de WhatsApp. IMSPORTS centraliza todo.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal">
+        <div class="feature-icon">📊</div>
+        <h3>Estadísticas automáticas</h3>
+        <p>Goles, asistencias, MVPs, victorias y derrotas. Todo se calcula solo después de cada partido.</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">🏆</div>
+        <h3>Rankings y ligas</h3>
+        <p>Rankings en tiempo real dentro de tu grupo. ¿Quién es el goleador? ¿Quién tiene más MVPs? Todo visible.</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">📢</div>
+        <h3>Convocatoria inteligente</h3>
+        <p>Envía la convocatoria, confirma asistencia, arma los equipos y define titulares. Todo desde la app.</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">🔄</div>
+        <h3>Partidos recurrentes</h3>
+        <p>Configura tu pichanga semanal una vez. IMSPORTS crea el próximo partido automáticamente al cerrar el anterior.</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">⚡</div>
+        <h3>Historial completo</h3>
+        <p>Cada partido queda registrado con equipos, resultado, goleadores y MVP. Tu grupo tiene memoria.</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">👥</div>
+        <h3>Gestión de grupo</h3>
+        <p>Invita miembros, asigna roles de admin, y gestiona tu grupo deportivo como un verdadero equipo.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how-it-works" id="how">
+    <div class="section-header reveal">
+      <div class="tag">Cómo funciona</div>
+      <h2>3 pasos, cero complicaciones</h2>
+    </div>
+    <div class="steps">
+      <div class="step reveal">
+        <div class="step-number">1</div>
+        <div>
+          <h3>Crea tu grupo</h3>
+          <p>Elige el deporte, ponle nombre a tu grupo e invita a tus amigos con un link. En 30 segundos están todos adentro.</p>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="step-number">2</div>
+        <div>
+          <h3>Juega y registra</h3>
+          <p>Después de cada partido, registra el resultado, los equipos y elige al MVP. Las stats se actualizan solas.</p>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="step-number">3</div>
+        <div>
+          <h3>Compite y presume</h3>
+          <p>Mira los rankings, desafía al goleador, comparte tus stats en redes. Tu grupo deportivo ahora tiene historia.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SOCIAL PROOF -->
+  <section class="social-proof">
+    <div class="section-header reveal">
+      <div class="tag">Beta testers</div>
+      <h2>Lo que dicen nuestros primeros usuarios</h2>
+    </div>
+    <div class="testimonials-grid">
+      <div class="testimonial reveal">
+        <div class="testimonial-quote">"Por fin dejamos de pelear por quién lleva el conteo de goles. Ahora está todo en la app y nadie puede alegar."</div>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar">⚽</div>
+          <div>
+            <div class="testimonial-name">Grupo Galletas+Ibáñez</div>
+            <div class="testimonial-role">32 jugadores · 83 partidos</div>
+          </div>
+        </div>
+      </div>
+      <div class="testimonial reveal">
+        <div class="testimonial-quote">"La convocatoria es brutal. Antes mandaba el mensaje al WhatsApp y nadie respondía. Ahora con un toque confirman o rechazan."</div>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar">🏟️</div>
+          <div>
+            <div class="testimonial-name">Spid</div>
+            <div class="testimonial-role">Admin · 36 partidos · 54 goles</div>
+          </div>
+        </div>
+      </div>
+      <div class="testimonial reveal">
+        <div class="testimonial-quote">"Lo mejor es ver tu progreso. Saber que vas 28 ganados y 19 perdidos te motiva a ir al siguiente partido."</div>
+        <div class="testimonial-author">
+          <div class="testimonial-avatar">🎯</div>
+          <div>
+            <div class="testimonial-name">Robert</div>
+            <div class="testimonial-role">66 goles · 5 MVPs</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section" id="join">
+    <div class="cta-content">
+      <h2>Sé de los primeros</h2>
+      <p>Déjanos tu email y te avisamos cuando IMSPORTS esté disponible para tu grupo.</p>
+      <form class="email-form" onsubmit="handleSubmit(event)">
+        <input type="email" placeholder="tu@email.com" required>
+        <button type="submit">Quiero acceso</button>
+      </form>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 16px;">Sin spam. Solo te avisamos cuando esté listo.</p>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-text">2026 IMSPORTS. Hecho en Chile.</div>
+      <div class="footer-links">
+        <a href="#">Instagram</a>
+        <a href="#">TikTok</a>
+        <a href="mailto:hola@imsports.cl">Contacto</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Theme toggle
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+    }
+
+    // Scroll reveal
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    // Form submit
+    function handleSubmit(e) {
+      e.preventDefault();
+      const input = e.target.querySelector('input');
+      const email = input.value;
+      // TODO: Connect to Supabase or email service
+      alert('¡Gracias! Te avisaremos cuando IMSPORTS esté disponible.');
+      input.value = '';
+    }
+  </script>
+</body>
+</html>
