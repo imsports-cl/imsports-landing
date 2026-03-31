@@ -649,6 +649,31 @@
       box-shadow: 0 8px 40px var(--accent-glow);
     }
 
+    .email-form button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .form-message {
+      margin-top: 16px;
+      font-size: 14px;
+      font-weight: 500;
+      min-height: 20px;
+    }
+
+    .form-message.success {
+      color: #00E676;
+    }
+
+    .form-message.error {
+      color: #FF5252;
+    }
+
+    .form-message.loading {
+      color: var(--text-muted);
+    }
+
     /* ═══════════════════════════════════════════
        FOOTER
        ═══════════════════════════════════════════ */
@@ -938,11 +963,12 @@
     <div class="cta-content">
       <h2>Sé de los primeros</h2>
       <p>Déjanos tu email y te avisamos cuando IMSPORTS esté disponible para tu grupo.</p>
-      <form class="email-form" onsubmit="handleSubmit(event)">
-        <input type="email" placeholder="tu@email.com" required>
-        <button type="submit">Quiero acceso</button>
+      <form class="email-form" id="signup-form" onsubmit="handleSubmit(event)">
+        <input type="email" id="email-input" placeholder="tu@email.com" required>
+        <button type="submit" id="submit-btn">Quiero acceso</button>
       </form>
-      <p style="font-size: 12px; color: var(--text-muted); margin-top: 16px;">Sin spam. Solo te avisamos cuando esté listo.</p>
+      <div class="form-message" id="form-message"></div>
+      <p style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">Sin spam. Solo te avisamos cuando esté listo.</p>
     </div>
   </section>
 
@@ -978,14 +1004,65 @@
 
     document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
 
-    // Form submit
-    function handleSubmit(e) {
+    // Supabase config
+    const SUPABASE_URL = 'https://whxufmuakpmuyiatfttr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoeHVmbXVha3BtdXlpYXRmdHRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1NDgxOTEsImV4cCI6MjA5MDEyNDE5MX0.TB5FXT570-RyM8rW56Gsxj92LoXOhs_DtypZiZP1xiY';
+
+    // Form submit with Supabase
+    async function handleSubmit(e) {
       e.preventDefault();
-      const input = e.target.querySelector('input');
-      const email = input.value;
-      // TODO: Connect to Supabase or email service
-      alert('¡Gracias! Te avisaremos cuando IMSPORTS esté disponible.');
-      input.value = '';
+      const input = document.getElementById('email-input');
+      const btn = document.getElementById('submit-btn');
+      const msg = document.getElementById('form-message');
+      const email = input.value.trim();
+
+      if (!email) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Enviando...';
+      msg.className = 'form-message loading';
+      msg.textContent = 'Registrando tu email...';
+
+      try {
+        const res = await fetch(SUPABASE_URL + '/rest/v1/email_signups', {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({
+            email: email,
+            source: 'landing_imsports',
+            utm_source: new URLSearchParams(window.location.search).get('utm_source') || null,
+            utm_medium: new URLSearchParams(window.location.search).get('utm_medium') || null,
+            utm_campaign: new URLSearchParams(window.location.search).get('utm_campaign') || null
+          })
+        });
+
+        if (res.ok) {
+          msg.className = 'form-message success';
+          msg.textContent = '¡Listo! Te avisaremos cuando IMSPORTS esté disponible.';
+          input.value = '';
+        } else {
+          const err = await res.json().catch(() => ({}));
+          if (err.code === '23505') {
+            msg.className = 'form-message success';
+            msg.textContent = '¡Ya estás en la lista! Te avisaremos pronto.';
+            input.value = '';
+          } else {
+            throw new Error(err.message || 'Error al registrar');
+          }
+        }
+      } catch (error) {
+        msg.className = 'form-message error';
+        msg.textContent = 'Hubo un error. Intenta de nuevo o escríbenos a hola@imsports.cl';
+        console.error('Signup error:', error);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Quiero acceso';
+      }
     }
   </script>
 </body>
