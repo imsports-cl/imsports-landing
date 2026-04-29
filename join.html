@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Únete al grupo — IM SPORTS</title>
+
+  <!-- OG Tags for WhatsApp / Social Media Preview -->
+  <meta property="og:title" content="⚽ Te invitaron a un grupo en IM SPORTS">
+  <meta property="og:description" content="Toca para unirte al grupo, registrar partidos, competir en rankings y más. ¡Tu comunidad deportiva te espera!">
+  <meta property="og:image" content="https://imsports.app/og-invite.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="IM SPORTS">
+  <meta property="og:locale" content="es_CL">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="⚽ Te invitaron a un grupo en IM SPORTS">
+  <meta name="twitter:description" content="Toca para unirte al grupo y empezar a competir.">
+  <meta name="twitter:image" content="https://imsports.app/og-invite.png">
+
+  <!-- Deep Link: Try to open the app first -->
+  <meta name="apple-itunes-app" content="app-id=6761868170">
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --accent: #FF6B35;
+      --accent-glow: rgba(255, 107, 53, 0.15);
+      --bg: #0A0A0A;
+      --surface: #1C1C1E;
+      --surface-elevated: #2C2C2E;
+      --text-primary: #FFFFFF;
+      --text-secondary: #A0A0A0;
+      --text-muted: #6B6B6B;
+      --green: #00E676;
+      --radius: 16px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: var(--surface);
+      border-radius: 24px;
+      padding: 48px 32px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: 0 0 80px var(--accent-glow);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      margin-bottom: 32px;
+    }
+
+    .logo-icon {
+      background: var(--accent);
+      color: white;
+      font-weight: 900;
+      font-size: 18px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      letter-spacing: -0.5px;
+    }
+
+    .logo-text span {
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: -0.5px;
+    }
+
+    .invite-emoji { font-size: 64px; margin-bottom: 16px; }
+    .invite-title { font-size: 28px; font-weight: 800; margin-bottom: 12px; line-height: 1.2; }
+    .invite-subtitle { font-size: 16px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 32px; }
+
+    .code-box {
+      background: var(--surface-elevated);
+      border: 2px dashed var(--accent);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 32px;
+    }
+
+    .code-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .code-value { font-size: 36px; font-weight: 900; color: var(--accent); letter-spacing: 6px; font-family: 'SF Mono', 'Fira Code', monospace; }
+
+    .btn-primary {
+      display: block; width: 100%; padding: 18px 24px;
+      background: var(--accent); color: white;
+      font-size: 18px; font-weight: 700;
+      border: none; border-radius: 50px;
+      cursor: pointer; text-decoration: none;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(255, 107, 53, 0.4); }
+
+    .btn-secondary {
+      display: block; width: 100%; padding: 14px 24px;
+      background: transparent; color: var(--text-secondary);
+      font-size: 14px; font-weight: 600;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 50px; cursor: pointer;
+      text-decoration: none; margin-top: 12px;
+      transition: border-color 0.2s;
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--text-primary); }
+
+    .features { display: flex; justify-content: center; gap: 24px; margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.06); }
+    .feature { text-align: center; }
+    .feature-emoji { font-size: 24px; margin-bottom: 4px; }
+    .feature-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+    .footer { margin-top: 32px; color: var(--text-muted); font-size: 13px; }
+    .footer a { color: var(--accent); text-decoration: none; }
+
+    .spinner { display: none; margin: 16px auto; width: 32px; height: 32px; border: 3px solid var(--surface-elevated); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .spinner.active { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .redirect-msg { display: none; color: var(--green); font-size: 14px; margin-top: 8px; }
+    .redirect-msg.active { display: block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <div class="logo-icon">IM</div>
+      <div class="logo-text"><span>SPORTS</span></div>
+    </div>
+
+    <div class="invite-emoji">⚽</div>
+    <h1 class="invite-title">Te invitaron a un grupo</h1>
+    <p class="invite-subtitle">Únete para registrar partidos, competir en rankings, votar MVP y más.</p>
+
+    <div class="code-box">
+      <div class="code-label">Código de invitación</div>
+      <div class="code-value" id="invite-code">---</div>
+    </div>
+
+    <div class="spinner" id="spinner"></div>
+    <div class="redirect-msg" id="redirect-msg">Abriendo IM SPORTS...</div>
+
+    <a href="#" class="btn-primary" id="open-app-btn">Abrir en IM SPORTS</a>
+    <a href="https://apps.apple.com/app/id6761868170" class="btn-secondary" id="download-btn">Descargar IM SPORTS para iOS</a>
+
+    <div class="features">
+      <div class="feature"><div class="feature-emoji">📊</div><div class="feature-label">Stats</div></div>
+      <div class="feature"><div class="feature-emoji">🏆</div><div class="feature-label">Rankings</div></div>
+      <div class="feature"><div class="feature-emoji">⭐</div><div class="feature-label">MVP</div></div>
+      <div class="feature"><div class="feature-emoji">💬</div><div class="feature-label">Chat</div></div>
+    </div>
+  </div>
+
+  <p class="footer"><a href="https://imsports.app">imsports.app</a> — La plataforma donde tu grupo deportivo vive, compite y crece.</p>
+
+  <script>
+    (function() {
+      var path = window.location.pathname;
+      var match = path.match(/\/join\/([A-Za-z0-9]+)/);
+      var code = match ? match[1].toUpperCase() : null;
+
+      if (!code) {
+        document.getElementById('invite-code').textContent = 'INVÁLIDO';
+        return;
+      }
+
+      document.getElementById('invite-code').textContent = code;
+
+      var appDeepLink = 'imsports://join/' + code;
+      var openBtn = document.getElementById('open-app-btn');
+      openBtn.href = appDeepLink;
+
+      openBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        var spinner = document.getElementById('spinner');
+        var redirectMsg = document.getElementById('redirect-msg');
+        spinner.classList.add('active');
+        redirectMsg.classList.add('active');
+        window.location.href = appDeepLink;
+        setTimeout(function() {
+          spinner.classList.remove('active');
+          redirectMsg.textContent = 'App no encontrada. Redirigiendo a App Store...';
+          setTimeout(function() {
+            window.location.href = 'https://apps.apple.com/app/id6761868170';
+          }, 1000);
+        }, 1500);
+      });
+
+      var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        setTimeout(function() { window.location.href = appDeepLink; }, 500);
+      }
+    })();
+  </script>
+</body>
+</html>
