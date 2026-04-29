@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["NSFHLK5399.cl.imsports.app"],
+        "paths": ["/join/*"]
+      }
+    ]
+  }
+}
