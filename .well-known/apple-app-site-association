@@ -4,8 +4,17 @@
     "details": [
       {
         "appIDs": ["NSFHLK5399.cl.imsports.app"],
-        "paths": ["/join/*"]
+        "paths": [
+          "/join/*",
+          "/match/*",
+          "/group/*",
+          "/profile",
+          "/profile/*"
+        ]
       }
     ]
+  },
+  "webcredentials": {
+    "apps": ["NSFHLK5399.cl.imsports.app"]
   }
 }
