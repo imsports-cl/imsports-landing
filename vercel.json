@@ -1,27 +1,19 @@
 {
-  "buildCommand": "",
-  "outputDirectory": ".",
-  "cleanUrls": true,
-  "rewrites": [
-    { "source": "/join/:code", "destination": "/join.html" },
-    { "source": "/match/:id", "destination": "/index.html" },
-    { "source": "/group/:id", "destination": "/index.html" },
-    { "source": "/profile", "destination": "/index.html" },
-    { "source": "/profile/:rest*", "destination": "/index.html" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ],
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
   "headers": [
     {
       "source": "/.well-known/apple-app-site-association",
       "headers": [
-        { "key": "Content-Type", "value": "application/json" }
+        { "key": "Content-Type", "value": "application/json" },
+        { "key": "Cache-Control", "value": "no-cache" }
       ]
     },
     {
-      "source": "/(.*)",
+      "source": "/.well-known/assetlinks.json",
       "headers": [
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" }
+        { "key": "Content-Type", "value": "application/json" },
+        { "key": "Cache-Control", "value": "no-cache" }
       ]
     }
   ]
