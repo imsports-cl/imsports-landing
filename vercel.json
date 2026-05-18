@@ -1,6 +1,13 @@
 {
+  "buildCommand": "",
+  "outputDirectory": ".",
+  "cleanUrls": true,
   "rewrites": [
     { "source": "/join/:code", "destination": "/join.html" },
+    { "source": "/match/:id", "destination": "/index.html" },
+    { "source": "/group/:id", "destination": "/index.html" },
+    { "source": "/profile", "destination": "/index.html" },
+    { "source": "/profile/:rest*", "destination": "/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
