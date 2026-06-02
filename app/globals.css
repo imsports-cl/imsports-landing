@@ -28,6 +28,7 @@
   --badge-text: #00E676;
   --cta-text: #0A0A0A;
   --nav-bg: rgba(10, 10, 10, 0.85);
+  --logo-bg: #5FE085; /* verde app (modo nocturno) */
 }
 
 [data-theme="dark"] {
@@ -51,6 +52,7 @@
   --badge-text: #00E676;
   --cta-text: #0A0A0A;
   --nav-bg: rgba(10, 10, 10, 0.85);
+  --logo-bg: #5FE085; /* verde app (modo nocturno) */
 }
 
 /* LIGHT MODE: Fire Orange */
@@ -75,6 +77,7 @@
   --badge-text: #FF6B35;
   --cta-text: #FFFFFF;
   --nav-bg: rgba(250, 250, 250, 0.85);
+  --logo-bg: #FF6B2B; /* naranja app (modo diurno) */
 }
 
 /* ═══════════════════════════════════════════
@@ -144,7 +147,7 @@ nav {
 .logo-icon {
   width: 36px;
   height: 36px;
-  background: #5FE085; /* verde del icono de la app */
+  background: var(--logo-bg); /* verde nocturno / naranja diurno, igual que la app */
   border-radius: 10px;
   display: flex;
   align-items: center;
