@@ -98,10 +98,8 @@ export default function Landing() {
       <nav>
         <div className="nav-inner">
           <a href="#" className="logo">
-            <div className="logo-icon">I&apos;M</div>
-            <div className="logo-text">
-              IM<span>SPORTS</span>
-            </div>
+            <div className="logo-icon">IM</div>
+            <div className="logo-text">SPORTS</div>
           </a>
           <div className="nav-links">
             <a href="#features">Features</a>
