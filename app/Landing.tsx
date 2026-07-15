@@ -123,7 +123,7 @@ export default function Landing() {
         <div className="hero-content">
           <div className="hero-badge">
             <span className="dot" />
-            Disponible en App Store · Pronto en Google Play
+            Disponible en App Store y en la Web · Pronto en Google Play
           </div>
           <h1>
             Tu grupo deportivo
@@ -151,8 +151,8 @@ export default function Landing() {
               </svg>
               Descargar en App Store
             </a>
-            <a href="#features" className="btn-secondary">
-              Conoce más
+            <a href="https://app.imsports.app" className="btn-secondary">
+              🌐 Usar en la Web
             </a>
           </div>
         </div>
@@ -162,16 +162,16 @@ export default function Landing() {
       <section className="stats-bar">
         <div className="stats-grid">
           <div className="stat-item reveal">
-            <div className="stat-number">83+</div>
+            <div className="stat-number">92+</div>
             <div className="stat-label">Partidos registrados</div>
           </div>
           <div className="stat-item reveal">
-            <div className="stat-number">32</div>
+            <div className="stat-number">60</div>
             <div className="stat-label">Jugadores activos</div>
           </div>
           <div className="stat-item reveal">
-            <div className="stat-number">2,237</div>
-            <div className="stat-label">Participaciones</div>
+            <div className="stat-number">789</div>
+            <div className="stat-label">Goles registrados</div>
           </div>
           <div className="stat-item reveal">
             <div className="stat-number">100%</div>
@@ -295,7 +295,7 @@ export default function Landing() {
               <div className="testimonial-avatar">⚽</div>
               <div>
                 <div className="testimonial-name">Grupo Galletas+Ibáñez</div>
-                <div className="testimonial-role">32 jugadores · 83 partidos</div>
+                <div className="testimonial-role">60 jugadores · 92 partidos</div>
               </div>
             </div>
           </div>
@@ -308,20 +308,20 @@ export default function Landing() {
               <div className="testimonial-avatar">🏟️</div>
               <div>
                 <div className="testimonial-name">Spid</div>
-                <div className="testimonial-role">Admin · 36 partidos · 54 goles</div>
+                <div className="testimonial-role">Admin · 43 partidos · 68 goles</div>
               </div>
             </div>
           </div>
           <div className="testimonial reveal">
             <div className="testimonial-quote">
-              &quot;Lo mejor es ver tu progreso. Saber que vas 28 ganados y 19 perdidos te motiva a
+              &quot;Lo mejor es ver tu progreso. Saber que vas 31 ganados y 22 perdidos te motiva a
               ir al siguiente partido.&quot;
             </div>
             <div className="testimonial-author">
               <div className="testimonial-avatar">🎯</div>
               <div>
                 <div className="testimonial-name">Robert</div>
-                <div className="testimonial-role">66 goles · 5 MVPs</div>
+                <div className="testimonial-role">85 goles · 8 MVPs</div>
               </div>
             </div>
           </div>
