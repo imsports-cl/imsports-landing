@@ -8,7 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { supabase as service } from '../../../lib/supabase';
 
-const ADMINS = ['bmadain@gmail.com', 'p_ibanez@hotmail.com'];
+// Barham + Pablo Ibáñez (Spid). Para agregar admins: sumar email y redeploy.
+const ADMINS = ['bmadain@gmail.com', 'pablo.ibanezd@gmail.com'];
 
 export const dynamic = 'force-dynamic';
 
