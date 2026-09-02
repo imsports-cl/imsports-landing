@@ -18,6 +18,21 @@ interface RankRow { nombre: string; is_ghost: boolean; pj: number; v: number; e:
 interface RegRow { nombre: string; email: string; registrado: string; ultimo_acceso: string | null; partidos: number; }
 interface PanelData { fechas: string[]; ranking: RankRow[]; registrados: RegRow[]; }
 
+// ─── Moderación (App Store Guideline 1.2) ───────────────────────────────
+interface UserRef { id: string; display_name: string | null; email: string | null; suspended_at?: string | null; }
+interface Denuncia {
+  id: string; kind: string; target_id: string | null; reason: string;
+  content_snapshot: string | null; created_at: string;
+  reporter: UserRef | null; denunciado: UserRef | null; grupo: { id: string; name: string } | null;
+}
+interface Suspendido { id: string; display_name: string | null; email: string | null; suspended_at: string; suspended_reason: string | null; }
+interface ModData { denuncias: Denuncia[]; suspendidos: Suspendido[]; }
+
+const KIND_LABEL: Record<string, string> = {
+  group_message: 'Mensaje de chat', group_photo: 'Foto',
+  photo_comment: 'Comentario', user: 'Perfil',
+};
+
 const S = {
   bg: '#0A0A0A', card: '#161616', border: '#2A2A2A',
   accent: '#00E676', text: '#FFFFFF', dim: '#9A9A9A',
@@ -31,7 +46,9 @@ export default function AdminPage() {
   const [loginErr, setLoginErr] = useState('');
   const [data, setData] = useState<PanelData | null>(null);
   const [denied, setDenied] = useState(false);
-  const [tab, setTab] = useState<'ranking' | 'registrados'>('ranking');
+  const [tab, setTab] = useState<'ranking' | 'registrados' | 'moderacion'>('ranking');
+  const [mod, setMod] = useState<ModData | null>(null);
+  const [ocupado, setOcupado] = useState<string | null>(null);
 
   useEffect(() => {
     supa.auth.getSession().then(({ data: { session } }) => { setSession(session); setReady(true); });
@@ -50,6 +67,29 @@ export default function AdminPage() {
       .then((d) => d && setData(d))
       .catch(() => setDenied(true));
   }, [session]);
+
+  // Moderación: se carga aparte, solo al abrir la pestaña.
+  const cargarModeracion = async () => {
+    if (!session) return;
+    const r = await fetch('/admin/api/moderacion', { headers: { Authorization: `Bearer ${session.access_token}` } });
+    if (r.ok) setMod(await r.json());
+  };
+  useEffect(() => { if (tab === 'moderacion') cargarModeracion(); /* eslint-disable-next-line */ }, [tab, session]);
+
+  const accionMod = async (payload: Record<string, unknown>, clave: string, confirmar?: string) => {
+    if (!session) return;
+    if (confirmar && !window.confirm(confirmar)) return;
+    setOcupado(clave);
+    try {
+      const r = await fetch('/admin/api/moderacion', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) { alert((await r.json().catch(() => ({}))).error ?? 'No se pudo completar la acción'); return; }
+      await cargarModeracion();
+    } finally { setOcupado(null); }
+  };
 
   const loginGoogle = () =>
     supa.auth.signInWithOAuth({
@@ -115,10 +155,14 @@ export default function AdminPage() {
         ) : (
           <>
             <nav style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-              {(['ranking', 'registrados'] as const).map((t) => (
+              {(['ranking', 'registrados', 'moderacion'] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   style={{ padding: '8px 16px', borderRadius: 100, border: `1px solid ${tab === t ? S.accent : S.border}`, background: tab === t ? 'rgba(0,230,118,0.12)' : 'transparent', color: tab === t ? S.accent : S.dim, fontWeight: 700, cursor: 'pointer' }}>
-                  {t === 'ranking' ? `⚽ Últimas 12 pichangas` : `👥 Registrados (${data.registrados.length})`}
+                  {t === 'ranking'
+                    ? `⚽ Últimas 12 pichangas`
+                    : t === 'registrados'
+                    ? `👥 Registrados (${data.registrados.length})`
+                    : `🛡️ Moderación${mod?.denuncias.length ? ` (${mod.denuncias.length})` : ''}`}
                 </button>
               ))}
             </nav>
@@ -169,6 +213,116 @@ export default function AdminPage() {
                     </tbody>
                   </table>
                 </div>
+              </section>
+            )}
+
+            {tab === 'moderacion' && (
+              <section style={box}>
+                <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
+                  Denuncias de los jugadores y cuentas suspendidas. Suspender no borra nada:
+                  el historial de partidos, goles y MVP queda intacto y se puede revertir.
+                </p>
+
+                <h3 style={{ fontSize: 15, margin: '18px 0 10px' }}>
+                  Denuncias pendientes {mod ? `(${mod.denuncias.length})` : ''}
+                </h3>
+
+                {!mod ? (
+                  <p style={{ color: S.dim, fontSize: 14 }}>Cargando…</p>
+                ) : mod.denuncias.length === 0 ? (
+                  <p style={{ color: S.dim, fontSize: 14 }}>Sin denuncias pendientes. 🎉</p>
+                ) : (
+                  mod.denuncias.map((d) => (
+                    <div key={d.id} style={{ border: `1px solid ${S.border}`, borderRadius: 12, padding: 14, marginBottom: 12, background: '#0F0F0F' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+                        <strong style={{ fontSize: 14 }}>
+                          {KIND_LABEL[d.kind] ?? d.kind}
+                          {d.grupo ? <span style={{ color: S.dim, fontWeight: 400 }}> · {d.grupo.name}</span> : null}
+                        </strong>
+                        <span style={{ color: S.dim, fontSize: 12 }}>
+                          {new Date(d.created_at).toLocaleString('es-CL')}
+                        </span>
+                      </div>
+
+                      <p style={{ margin: '0 0 8px', fontSize: 14 }}>
+                        <span style={{ color: S.dim }}>Motivo:</span> {d.reason}
+                      </p>
+                      <p style={{ margin: '0 0 8px', fontSize: 13, color: S.dim }}>
+                        Denuncia <strong style={{ color: S.text }}>{d.reporter?.display_name ?? '—'}</strong>
+                        {' · '}Denunciado <strong style={{ color: S.text }}>{d.denunciado?.display_name ?? '—'}</strong>
+                        {d.denunciado?.suspended_at ? ' (ya suspendido)' : ''}
+                      </p>
+
+                      {d.content_snapshot && (
+                        <blockquote style={{ margin: '0 0 12px', padding: '8px 12px', borderLeft: `3px solid ${S.border}`, color: S.dim, fontSize: 13, whiteSpace: 'pre-wrap' }}>
+                          {d.content_snapshot}
+                        </blockquote>
+                      )}
+
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {d.target_id && d.kind !== 'user' && (
+                          <button
+                            disabled={ocupado === d.id}
+                            onClick={() => accionMod({ action: 'hide', reportId: d.id, kind: d.kind, targetId: d.target_id }, d.id)}
+                            style={{ border: `1px solid ${S.border}`, background: 'transparent', color: S.text, borderRadius: 8, padding: '7px 13px', cursor: 'pointer', fontSize: 13 }}>
+                            Ocultar contenido
+                          </button>
+                        )}
+                        {d.denunciado && !d.denunciado.suspended_at && (
+                          <button
+                            disabled={ocupado === d.id}
+                            onClick={() => accionMod(
+                              { action: 'suspend', reportId: d.id, userId: d.denunciado!.id, motivo: d.reason },
+                              d.id,
+                              `¿Suspender a ${d.denunciado!.display_name ?? 'este usuario'}? No podrá entrar ni publicar. Su historial se conserva y puedes revertirlo.`
+                            )}
+                            style={{ border: '1px solid #FF6B6B', background: 'transparent', color: '#FF6B6B', borderRadius: 8, padding: '7px 13px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                            Suspender usuario
+                          </button>
+                        )}
+                        <button
+                          disabled={ocupado === d.id}
+                          onClick={() => accionMod({ action: 'dismiss', reportId: d.id }, d.id)}
+                          style={{ border: `1px solid ${S.border}`, background: 'transparent', color: S.dim, borderRadius: 8, padding: '7px 13px', cursor: 'pointer', fontSize: 13 }}>
+                          Descartar
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+
+                <h3 style={{ fontSize: 15, margin: '24px 0 10px' }}>
+                  Cuentas suspendidas {mod ? `(${mod.suspendidos.length})` : ''}
+                </h3>
+                {!mod || mod.suspendidos.length === 0 ? (
+                  <p style={{ color: S.dim, fontSize: 14 }}>Ninguna.</p>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead><tr>
+                        <th style={th}>Jugador</th><th style={th}>Email</th><th style={th}>Desde</th><th style={th}>Motivo</th><th style={th}></th>
+                      </tr></thead>
+                      <tbody>
+                        {mod.suspendidos.map((u) => (
+                          <tr key={u.id}>
+                            <td style={{ ...td, fontWeight: 600 }}>{u.display_name ?? '—'}</td>
+                            <td style={{ ...td, color: S.dim }}>{u.email ?? '—'}</td>
+                            <td style={td}>{new Date(u.suspended_at).toLocaleDateString('es-CL')}</td>
+                            <td style={{ ...td, color: S.dim }}>{u.suspended_reason ?? '—'}</td>
+                            <td style={td}>
+                              <button
+                                disabled={ocupado === u.id}
+                                onClick={() => accionMod({ action: 'unsuspend', userId: u.id }, u.id)}
+                                style={{ border: `1px solid ${S.accent}`, background: 'transparent', color: S.accent, borderRadius: 8, padding: '5px 11px', cursor: 'pointer', fontSize: 13 }}>
+                                Reactivar
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
             )}
           </>
