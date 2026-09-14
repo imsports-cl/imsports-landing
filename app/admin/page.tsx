@@ -19,8 +19,10 @@ interface RegRow { nombre: string; email: string; registrado: string; ultimo_acc
 interface LineupPlayer {
   user_id: string; nombre: string; pj: number; orden: number; pos: number;
   titular: boolean; asegurado: boolean; es_mvp: boolean;
+  sancionado: boolean; sancion_motivo: string | null;
   asegura_hasta: string | null; confirmo_at: string | null;
 }
+interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean }
 interface CupoRow { user_id: string; nombre: string; hasta: string; es_mvp: boolean; manual: boolean; }
 interface Lineup {
   match: { id: string; fecha: string; hora: string | null; lugar: string | null; fase: string; cupos: number };
@@ -29,7 +31,9 @@ interface Lineup {
   jugadores: LineupPlayer[];
   asegurados_sin_confirmar: { user_id: string; nombre: string; asegura_hasta: string; estado: string }[];
   cupos_asegurados: CupoRow[];
+  sanciones: SancionRow[];
 }
+const MOTIVOS: Record<string, string> = { no_pago: '💸 No pagó a tiempo', atraso: '⏰ Llegó tarde' };
 interface Miembro { user_id: string; nombre: string }
 interface PanelData { fechas: string[]; ranking: RankRow[]; registrados: RegRow[]; lineup: Lineup; miembros: Miembro[]; }
 
@@ -82,6 +86,9 @@ export default function AdminPage() {
   // Form para agregar cupo manual
   const [nuevoUser, setNuevoUser] = useState('');
   const [nuevaFecha, setNuevaFecha] = useState('');
+  // Form "pierde cupo"
+  const [sancUser, setSancUser] = useState('');
+  const [sancMotivo, setSancMotivo] = useState('atraso');
 
   useEffect(() => {
     supa.auth.getSession().then(({ data: { session } }) => { setSession(session); setReady(true); });
@@ -101,15 +108,15 @@ export default function AdminPage() {
     cargar(session.access_token).catch(() => setDenied(true));
   }, [session, cupos]);
 
-  /** Agregar / quitar / restaurar cupos asegurados */
-  const mutarCupo = async (accion: string, user_id: string, hasta?: string) => {
+  /** Cupos asegurados (agregar/quitar/restaurar) y sanciones (sancionar/quitar_sancion) */
+  const mutarCupo = async (accion: string, user_id: string, hasta?: string, reason?: string) => {
     if (!session) return;
     setBusy(true);
     try {
       await fetch('/admin/api', {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accion, user_id, hasta }),
+        body: JSON.stringify({ accion, user_id, hasta, reason }),
       });
       await cargar(session.access_token);
     } finally { setBusy(false); }
@@ -221,17 +228,18 @@ export default function AdminPage() {
               const titulares = L.jugadores.filter((j) => j.titular);
               const banca = L.jugadores.filter((j) => !j.titular);
               const comoEntra = (j: LineupPlayer) =>
-                j.es_mvp ? '🌟 MVP fecha pasada'
+                j.sancionado ? `⛔ Pierde cupo · ${MOTIVOS[j.sancion_motivo || ''] || j.sancion_motivo}`
+                : j.es_mvp ? '🌟 MVP fecha pasada'
                 : j.asegurado ? `🪑 Banca · asegura hasta ${fechaCorta(j.asegura_hasta)}`
                 : 'Puntaje';
               const filaJ = (j: LineupPlayer, destacar: boolean) => (
-                <tr key={j.user_id}>
+                <tr key={j.user_id} style={j.sancionado ? { background: 'rgba(255,107,107,0.07)' } : undefined}>
                   <td style={{ ...td, color: S.dim, width: 34 }}>{j.pos}</td>
                   <td style={{ ...td, fontWeight: 700 }}>{j.nombre}</td>
-                  <td style={{ ...td, fontSize: 13, color: j.es_mvp || j.asegurado ? S.accent : S.dim }}>
-                    {destacar ? comoEntra(j) : '—'}
+                  <td style={{ ...td, fontSize: 13, color: j.sancionado ? '#FF8A8A' : j.es_mvp || j.asegurado ? S.accent : S.dim }}>
+                    {destacar || j.sancionado ? comoEntra(j) : '—'}
                   </td>
-                  <td style={{ ...td, fontWeight: 800, color: destacar ? S.text : S.dim }}>{j.pj}</td>
+                  <td style={{ ...td, fontWeight: 800, color: j.sancionado ? S.dim : destacar ? S.text : S.dim, textDecoration: j.sancionado ? 'line-through' : undefined }}>{j.pj}</td>
                   <td style={{ ...td, color: S.dim, fontSize: 13 }}>{j.orden}º · {horaCorta(j.confirmo_at)}</td>
                 </tr>
               );
@@ -343,6 +351,55 @@ export default function AdminPage() {
                         onClick={async () => { await mutarCupo('agregar', nuevoUser, nuevaFecha); setNuevoUser(''); setNuevaFecha(''); }}
                         style={{ background: nuevoUser && nuevaFecha ? S.accent : S.border, color: '#0A0A0A', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 800, cursor: nuevoUser && nuevaFecha ? 'pointer' : 'default' }}>
                         Agregar
+                      </button>
+                    </div>
+                  </section>
+
+                  <section style={{ ...box, marginTop: 16 }}>
+                    <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>⛔ Pierden cupo esta fecha</h3>
+                    <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
+                      Por no pagar a tiempo o llegar tarde. Quedan al final de la lista (sin puntos) y entre
+                      ellos ordena la hora de confirmación. Si hay cupo igual juegan. Dura solo esta fecha.
+                    </p>
+
+                    {L.sanciones.length === 0 ? (
+                      <p style={{ color: S.dim, fontSize: 13 }}>Nadie pierde cupo el {fechaCorta(L.match.fecha)}.</p>
+                    ) : (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 6 }}>
+                        <tbody>
+                          {L.sanciones.map((s) => (
+                            <tr key={s.user_id}>
+                              <td style={{ ...td, fontWeight: 700 }}>⛔ {s.nombre}</td>
+                              <td style={{ ...td, color: S.dim, fontSize: 13 }}>
+                                {MOTIVOS[s.motivo] || s.motivo}{!s.confirmo && ' · no ha confirmado'}
+                              </td>
+                              <td style={{ ...td, textAlign: 'right' }}>
+                                <button onClick={() => mutarCupo('quitar_sancion', s.user_id, L.match.fecha)} disabled={busy}
+                                  style={{ background: 'none', border: `1px solid ${S.border}`, color: S.accent, borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+                                  Perdonar
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <select value={sancUser} onChange={(e) => setSancUser(e.target.value)}
+                        style={{ background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '8px 10px', flex: 1, minWidth: 160 }}>
+                        <option value="">+ Marcar jugador…</option>
+                        {data.miembros?.map((m) => <option key={m.user_id} value={m.user_id}>{m.nombre}</option>)}
+                      </select>
+                      <select value={sancMotivo} onChange={(e) => setSancMotivo(e.target.value)}
+                        style={{ background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '8px 10px' }}>
+                        <option value="atraso">⏰ Llegó tarde</option>
+                        <option value="no_pago">💸 No pagó a tiempo</option>
+                      </select>
+                      <button disabled={!sancUser || busy}
+                        onClick={async () => { await mutarCupo('sancionar', sancUser, L.match.fecha, sancMotivo); setSancUser(''); }}
+                        style={{ background: sancUser ? '#FF6B6B' : S.border, color: '#0A0A0A', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 800, cursor: sancUser ? 'pointer' : 'default' }}>
+                        Pierde cupo
                       </button>
                     </div>
                   </section>

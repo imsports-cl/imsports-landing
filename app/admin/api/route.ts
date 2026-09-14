@@ -99,5 +99,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // ── "Pierde cupo": sanción de UNA fecha (no pagó a tiempo / llegó tarde) ──
+  if (accion === 'sancionar') {
+    if (!user_id || !hasta) return NextResponse.json({ error: 'faltan datos' }, { status: 400 });
+    const { error } = await service.from('player_sanctions').upsert(
+      { group_id: grupo.id, user_id, applies_to: hasta, reason: reason || 'atraso' },
+      { onConflict: 'group_id,user_id,applies_to' }
+    );
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (accion === 'quitar_sancion') {
+    if (!user_id || !hasta) return NextResponse.json({ error: 'faltan datos' }, { status: 400 });
+    const { error } = await service.from('player_sanctions')
+      .delete().eq('group_id', grupo.id).eq('user_id', user_id).eq('applies_to', hasta);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
   return NextResponse.json({ error: 'acción desconocida' }, { status: 400 });
 }
