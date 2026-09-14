@@ -16,7 +16,35 @@ const supa = createClient(
 
 interface RankRow { nombre: string; is_ghost: boolean; pj: number; v: number; e: number; d: number; goles: number; mvp: number; }
 interface RegRow { nombre: string; email: string; registrado: string; ultimo_acceso: string | null; partidos: number; }
-interface PanelData { fechas: string[]; ranking: RankRow[]; registrados: RegRow[]; }
+interface LineupPlayer {
+  user_id: string; nombre: string; pj: number; orden: number; pos: number;
+  titular: boolean; asegurado: boolean; es_mvp: boolean;
+  asegura_hasta: string | null; confirmo_at: string | null;
+}
+interface CupoRow { user_id: string; nombre: string; hasta: string; es_mvp: boolean; manual: boolean; }
+interface Lineup {
+  match: { id: string; fecha: string; hora: string | null; lugar: string | null; fase: string; cupos: number };
+  mvp_previo: string | null;
+  fecha_previa: string | null;
+  jugadores: LineupPlayer[];
+  asegurados_sin_confirmar: { user_id: string; nombre: string; asegura_hasta: string; estado: string }[];
+  cupos_asegurados: CupoRow[];
+}
+interface Miembro { user_id: string; nombre: string }
+interface PanelData { fechas: string[]; ranking: RankRow[]; registrados: RegRow[]; lineup: Lineup; miembros: Miembro[]; }
+
+/** Fecha corta legible: 2026-09-28 → "28 sep" */
+const fechaCorta = (iso: string | null) => {
+  if (!iso) return '—';
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  return `${d} ${meses[m - 1]}`;
+};
+const horaCorta = (iso: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+};
 
 // ─── Moderación (App Store Guideline 1.2) ───────────────────────────────
 interface UserRef { id: string; display_name: string | null; email: string | null; suspended_at?: string | null; }
@@ -46,9 +74,14 @@ export default function AdminPage() {
   const [loginErr, setLoginErr] = useState('');
   const [data, setData] = useState<PanelData | null>(null);
   const [denied, setDenied] = useState(false);
-  const [tab, setTab] = useState<'ranking' | 'registrados' | 'moderacion'>('ranking');
+  const [tab, setTab] = useState<'titulares' | 'ranking' | 'registrados' | 'moderacion'>('titulares');
   const [mod, setMod] = useState<ModData | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
+  const [cupos, setCupos] = useState(12);
+  const [busy, setBusy] = useState(false);
+  // Form para agregar cupo manual
+  const [nuevoUser, setNuevoUser] = useState('');
+  const [nuevaFecha, setNuevaFecha] = useState('');
 
   useEffect(() => {
     supa.auth.getSession().then(({ data: { session } }) => { setSession(session); setReady(true); });
@@ -56,17 +89,31 @@ export default function AdminPage() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  const cargar = async (tok: string, n = cupos) => {
+    const r = await fetch(`/admin/api?cupos=${n}`, { headers: { Authorization: `Bearer ${tok}` } });
+    if (r.status === 403) { setDenied(true); return; }
+    if (!r.ok) { setDenied(true); return; }
+    setData(await r.json());
+  };
+
   useEffect(() => {
     if (!session) { setData(null); setDenied(false); return; }
-    fetch('/admin/api', { headers: { Authorization: `Bearer ${session.access_token}` } })
-      .then(async (r) => {
-        if (r.status === 403) { setDenied(true); return null; }
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      })
-      .then((d) => d && setData(d))
-      .catch(() => setDenied(true));
-  }, [session]);
+    cargar(session.access_token).catch(() => setDenied(true));
+  }, [session, cupos]);
+
+  /** Agregar / quitar / restaurar cupos asegurados */
+  const mutarCupo = async (accion: string, user_id: string, hasta?: string) => {
+    if (!session) return;
+    setBusy(true);
+    try {
+      await fetch('/admin/api', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion, user_id, hasta }),
+      });
+      await cargar(session.access_token);
+    } finally { setBusy(false); }
+  };
 
   // Moderación: se carga aparte, solo al abrir la pestaña.
   const cargarModeracion = async () => {
@@ -154,11 +201,13 @@ export default function AdminPage() {
           <p style={{ color: S.dim, textAlign: 'center', marginTop: 60 }}>Cargando…</p>
         ) : (
           <>
-            <nav style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-              {(['ranking', 'registrados', 'moderacion'] as const).map((t) => (
+            <nav style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+              {(['titulares', 'ranking', 'registrados', 'moderacion'] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   style={{ padding: '8px 16px', borderRadius: 100, border: `1px solid ${tab === t ? S.accent : S.border}`, background: tab === t ? 'rgba(0,230,118,0.12)' : 'transparent', color: tab === t ? S.accent : S.dim, fontWeight: 700, cursor: 'pointer' }}>
-                  {t === 'ranking'
+                  {t === 'titulares'
+                    ? `🎯 Titulares`
+                    : t === 'ranking'
                     ? `⚽ Últimas 12 pichangas`
                     : t === 'registrados'
                     ? `👥 Registrados (${data.registrados.length})`
@@ -166,6 +215,140 @@ export default function AdminPage() {
                 </button>
               ))}
             </nav>
+
+            {tab === 'titulares' && data.lineup && (() => {
+              const L = data.lineup;
+              const titulares = L.jugadores.filter((j) => j.titular);
+              const banca = L.jugadores.filter((j) => !j.titular);
+              const comoEntra = (j: LineupPlayer) =>
+                j.es_mvp ? '🌟 MVP fecha pasada'
+                : j.asegurado ? `🪑 Banca · asegura hasta ${fechaCorta(j.asegura_hasta)}`
+                : 'Puntaje';
+              const filaJ = (j: LineupPlayer, destacar: boolean) => (
+                <tr key={j.user_id}>
+                  <td style={{ ...td, color: S.dim, width: 34 }}>{j.pos}</td>
+                  <td style={{ ...td, fontWeight: 700 }}>{j.nombre}</td>
+                  <td style={{ ...td, fontSize: 13, color: j.es_mvp || j.asegurado ? S.accent : S.dim }}>
+                    {destacar ? comoEntra(j) : '—'}
+                  </td>
+                  <td style={{ ...td, fontWeight: 800, color: destacar ? S.text : S.dim }}>{j.pj}</td>
+                  <td style={{ ...td, color: S.dim, fontSize: 13 }}>{j.orden}º · {horaCorta(j.confirmo_at)}</td>
+                </tr>
+              );
+
+              return (
+                <>
+                  <section style={{ ...box, marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                      <div>
+                        <h2 style={{ margin: 0, fontSize: 17 }}>
+                          Pichanga {fechaCorta(L.match.fecha)}
+                          {L.match.hora ? ` · ${String(L.match.hora).slice(0, 5)}` : ''}
+                          {L.match.lugar ? ` · ${L.match.lugar}` : ''}
+                        </h2>
+                        <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>
+                          {L.jugadores.length} confirmados · MVP {fechaCorta(L.fecha_previa)}: <b style={{ color: S.accent }}>{L.mvp_previo || '—'}</b>
+                        </p>
+                      </div>
+                      <label style={{ color: S.dim, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        Cupos
+                        <select value={cupos} onChange={(e) => setCupos(Number(e.target.value))}
+                          style={{ background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '6px 10px' }}>
+                          {[10, 12, 14, 16, 18, 20, 22].map((n) => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  </section>
+
+                  {L.asegurados_sin_confirmar.length > 0 && (
+                    <section style={{ ...box, marginBottom: 16, borderColor: '#B7791F', background: 'rgba(183,121,31,0.08)' }}>
+                      <b style={{ color: '#F6C453' }}>⚠️ Aseguran cupo pero no han confirmado</b>
+                      <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>
+                        {L.asegurados_sin_confirmar.map((a) => `${a.nombre} (hasta ${fechaCorta(a.asegura_hasta)})`).join(' · ')}
+                        {' '}— si confirman entran directo y salen los últimos por puntaje.
+                      </p>
+                    </section>
+                  )}
+
+                  <section style={{ ...box, marginBottom: 16 }}>
+                    <h3 style={{ margin: '0 0 12px', fontSize: 15, color: S.accent }}>🟢 TITULARES ({titulares.length})</h3>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead><tr>
+                          <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Cómo entra</th><th style={th}>Asist.</th><th style={th}>Confirmó</th>
+                        </tr></thead>
+                        <tbody>{titulares.map((j) => filaJ(j, true))}</tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section style={{ ...box, marginBottom: 16 }}>
+                    <h3 style={{ margin: '0 0 12px', fontSize: 15, color: S.dim }}>🪑 BANCA ({banca.length})</h3>
+                    {banca.length === 0 ? <p style={{ color: S.dim, fontSize: 13 }}>Sin banca.</p> : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead><tr>
+                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}></th><th style={th}>Asist.</th><th style={th}>Confirmó</th>
+                          </tr></thead>
+                          <tbody>{banca.map((j) => filaJ(j, false))}</tbody>
+                        </table>
+                      </div>
+                    )}
+                    <p style={{ color: S.dim, fontSize: 12, marginBottom: 0, marginTop: 12 }}>
+                      Los que queden en banca aseguran cupo las próximas 4 fechas (se agregan solos al cerrar el partido).
+                    </p>
+                  </section>
+
+                  <section style={box}>
+                    <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>🎟️ Cupos asegurados vigentes</h3>
+                    <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
+                      Detectados automáticamente de la banca (4 fechas). Puedes cambiar la fecha o quitarlos.
+                    </p>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <tbody>
+                        {L.cupos_asegurados.map((c) => (
+                          <tr key={c.user_id}>
+                            <td style={{ ...td, fontWeight: 700 }}>{c.es_mvp ? '🌟 ' : '🪑 '}{c.nombre}</td>
+                            <td style={td}>
+                              {c.es_mvp ? (
+                                <span style={{ color: S.dim, fontSize: 13 }}>solo esta fecha</span>
+                              ) : (
+                                <input type="date" defaultValue={c.hasta?.slice(0, 10)} disabled={busy}
+                                  onChange={(e) => e.target.value && mutarCupo('agregar', c.user_id, e.target.value)}
+                                  style={{ background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '5px 8px', fontSize: 13 }} />
+                              )}
+                            </td>
+                            <td style={{ ...td, textAlign: 'right' }}>
+                              {!c.es_mvp && (
+                                <button onClick={() => mutarCupo('quitar', c.user_id)} disabled={busy}
+                                  style={{ background: 'none', border: `1px solid ${S.border}`, color: '#FF8A8A', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+                                  Quitar
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <select value={nuevoUser} onChange={(e) => setNuevoUser(e.target.value)}
+                        style={{ background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '8px 10px', flex: 1, minWidth: 160 }}>
+                        <option value="">+ Agregar jugador…</option>
+                        {data.miembros?.map((m) => <option key={m.user_id} value={m.user_id}>{m.nombre}</option>)}
+                      </select>
+                      <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)}
+                        style={{ background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '7px 10px' }} />
+                      <button disabled={!nuevoUser || !nuevaFecha || busy}
+                        onClick={async () => { await mutarCupo('agregar', nuevoUser, nuevaFecha); setNuevoUser(''); setNuevaFecha(''); }}
+                        style={{ background: nuevoUser && nuevaFecha ? S.accent : S.border, color: '#0A0A0A', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 800, cursor: nuevoUser && nuevaFecha ? 'pointer' : 'default' }}>
+                        Agregar
+                      </button>
+                    </div>
+                  </section>
+                </>
+              );
+            })()}
 
             {tab === 'ranking' && (
               <section style={box}>
