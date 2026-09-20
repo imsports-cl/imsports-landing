@@ -18,14 +18,14 @@ interface RankRow { nombre: string; is_ghost: boolean; pj: number; v: number; e:
 interface RegRow { nombre: string; email: string; registrado: string; ultimo_acceso: string | null; partidos: number; }
 interface LineupPlayer {
   user_id: string; nombre: string; pj: number; orden: number; pos: number;
-  titular: boolean; asegurado: boolean; es_mvp: boolean;
-  sancionado: boolean; sancion_motivo: string | null;
+  titular: boolean; asegurado: boolean; es_mvp: boolean; es_organizador: boolean;
+  sancionado: boolean; sancion_motivo: string | null; neteado: boolean;
   asegura_hasta: string | null; confirmo_at: string | null;
 }
-interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean }
-interface CupoRow { user_id: string; nombre: string; hasta: string; es_mvp: boolean; manual: boolean; }
+interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean; neteado: boolean }
+interface CupoRow { user_id: string; nombre: string; hasta: string; es_mvp: boolean; es_organizador: boolean; manual: boolean; }
 interface Lineup {
-  match: { id: string; fecha: string; hora: string | null; lugar: string | null; fase: string; cupos: number };
+  match: { id: string; fecha: string; hora: string | null; lugar: string | null; fase: string; cupos: number; organizador: string | null };
   mvp_previo: string | null;
   fecha_previa: string | null;
   jugadores: LineupPlayer[];
@@ -228,18 +228,22 @@ export default function AdminPage() {
               const titulares = L.jugadores.filter((j) => j.titular);
               const banca = L.jugadores.filter((j) => !j.titular);
               const comoEntra = (j: LineupPlayer) =>
-                j.sancionado ? `⛔ Pierde cupo · ${MOTIVOS[j.sancion_motivo || ''] || j.sancion_motivo}`
+                j.neteado ? `⚖️ Netea · aseguraba y perdió cupo → entra por puntaje`
+                : j.sancionado ? `⛔ Pierde cupo · ${MOTIVOS[j.sancion_motivo || ''] || j.sancion_motivo}`
                 : j.es_mvp ? '🌟 MVP fecha pasada'
+                : j.es_organizador ? '🎩 Organizador'
                 : j.asegurado ? `🪑 Banca · asegura hasta ${fechaCorta(j.asegura_hasta)}`
                 : 'Puntaje';
+              // sancionado puro = pierde los puntos; neteado sí los conserva
+              const sinPuntos = (j2: LineupPlayer) => j2.sancionado && !j2.neteado;
               const filaJ = (j: LineupPlayer, destacar: boolean) => (
-                <tr key={j.user_id} style={j.sancionado ? { background: 'rgba(255,107,107,0.07)' } : undefined}>
+                <tr key={j.user_id} style={sinPuntos(j) ? { background: 'rgba(255,107,107,0.07)' } : j.neteado ? { background: 'rgba(246,196,83,0.06)' } : undefined}>
                   <td style={{ ...td, color: S.dim, width: 34 }}>{j.pos}</td>
                   <td style={{ ...td, fontWeight: 700 }}>{j.nombre}</td>
-                  <td style={{ ...td, fontSize: 13, color: j.sancionado ? '#FF8A8A' : j.es_mvp || j.asegurado ? S.accent : S.dim }}>
+                  <td style={{ ...td, fontSize: 13, color: sinPuntos(j) ? '#FF8A8A' : j.neteado ? '#F6C453' : j.asegurado ? S.accent : S.dim }}>
                     {destacar || j.sancionado ? comoEntra(j) : '—'}
                   </td>
-                  <td style={{ ...td, fontWeight: 800, color: j.sancionado ? S.dim : destacar ? S.text : S.dim, textDecoration: j.sancionado ? 'line-through' : undefined }}>{j.pj}</td>
+                  <td style={{ ...td, fontWeight: 800, color: sinPuntos(j) ? S.dim : destacar ? S.text : S.dim, textDecoration: sinPuntos(j) ? 'line-through' : undefined }}>{j.pj}</td>
                   <td style={{ ...td, color: S.dim, fontSize: 13 }}>{j.orden}º · {horaCorta(j.confirmo_at)}</td>
                 </tr>
               );
@@ -256,6 +260,7 @@ export default function AdminPage() {
                         </h2>
                         <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>
                           {L.jugadores.length} confirmados · MVP {fechaCorta(L.fecha_previa)}: <b style={{ color: S.accent }}>{L.mvp_previo || '—'}</b>
+                          {L.match.organizador && <> · 🎩 Organiza: <b style={{ color: S.accent }}>{L.match.organizador}</b></>}
                         </p>
                       </div>
                       <label style={{ color: S.dim, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -316,10 +321,12 @@ export default function AdminPage() {
                       <tbody>
                         {L.cupos_asegurados.map((c) => (
                           <tr key={c.user_id}>
-                            <td style={{ ...td, fontWeight: 700 }}>{c.es_mvp ? '🌟 ' : '🪑 '}{c.nombre}</td>
+                            <td style={{ ...td, fontWeight: 700 }}>{c.es_mvp ? '🌟 ' : c.es_organizador ? '🎩 ' : '🪑 '}{c.nombre}</td>
                             <td style={td}>
-                              {c.es_mvp ? (
-                                <span style={{ color: S.dim, fontSize: 13 }}>solo esta fecha</span>
+                              {c.es_mvp || c.es_organizador ? (
+                                <span style={{ color: S.dim, fontSize: 13 }}>
+                                  {c.es_mvp ? 'MVP · solo esta fecha' : 'Organizador · solo esta fecha'}
+                                </span>
                               ) : (
                                 <input type="date" defaultValue={c.hasta?.slice(0, 10)} disabled={busy}
                                   onChange={(e) => e.target.value && mutarCupo('agregar', c.user_id, e.target.value)}
@@ -327,7 +334,7 @@ export default function AdminPage() {
                               )}
                             </td>
                             <td style={{ ...td, textAlign: 'right' }}>
-                              {!c.es_mvp && (
+                              {!c.es_mvp && !c.es_organizador && (
                                 <button onClick={() => mutarCupo('quitar', c.user_id)} disabled={busy}
                                   style={{ background: 'none', border: `1px solid ${S.border}`, color: '#FF8A8A', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
                                   Quitar
@@ -360,6 +367,9 @@ export default function AdminPage() {
                     <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
                       Por no pagar a tiempo o llegar tarde. Quedan al final de la lista (sin puntos) y entre
                       ellos ordena la hora de confirmación. Si hay cupo igual juegan. Dura solo esta fecha.
+                      <br />
+                      <b style={{ color: '#F6C453' }}>⚖️ Netea:</b> si el sancionado ya aseguraba cupo (MVP,
+                      organizador o banca), se anulan y entra por puntaje normal.
                     </p>
 
                     {L.sanciones.length === 0 ? (
@@ -371,7 +381,9 @@ export default function AdminPage() {
                             <tr key={s.user_id}>
                               <td style={{ ...td, fontWeight: 700 }}>⛔ {s.nombre}</td>
                               <td style={{ ...td, color: S.dim, fontSize: 13 }}>
-                                {MOTIVOS[s.motivo] || s.motivo}{!s.confirmo && ' · no ha confirmado'}
+                                {MOTIVOS[s.motivo] || s.motivo}
+                                {s.neteado && <span style={{ color: '#F6C453' }}> · ⚖️ netea (aseguraba cupo)</span>}
+                                {!s.confirmo && ' · no ha confirmado'}
                               </td>
                               <td style={{ ...td, textAlign: 'right' }}>
                                 <button onClick={() => mutarCupo('quitar_sancion', s.user_id, L.match.fecha)} disabled={busy}
