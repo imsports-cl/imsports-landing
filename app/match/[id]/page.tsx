@@ -8,7 +8,10 @@
  * WhatsApp/Twitter/etc. muestren preview rico cuando se comparte el link.
  */
 import type { Metadata } from 'next';
-import { fetchMatchForOG, PHASE_LABELS, PHASE_EMOJI } from '@/lib/supabase';
+import {
+  fetchMatchForOG, PHASE_LABELS, PHASE_EMOJI,
+  scorersLine, startersOf, benchOf, shortName, formatShortDate, ogVersion,
+} from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -39,22 +42,61 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const phaseLabel = PHASE_LABELS[match.phase] || 'Partido';
   const emoji = PHASE_EMOJI[match.phase] || '⚽';
 
-  const title = `${emoji} ${groupName} — ${phaseLabel}`;
+  const teamA = match.team_a_name || 'Equipo A';
+  const teamB = match.team_b_name || 'Equipo B';
+  const names = (list: { name: string }[]) => list.map((p) => shortName(p.name)).join(', ');
+  const shortDate = formatShortDate(match.date);
 
+  let title = `${emoji} ${groupName} — ${phaseLabel}`;
   let description: string;
+
   if (match.phase === 'closed') {
-    const score = `${match.team_a_score ?? 0} - ${match.team_b_score ?? 0}`;
-    const mvpStr = match.mvp ? ` · MVP: ${match.mvp.display_name}` : '';
-    description = `Resultado: ${score}${mvpStr}`;
+    // 🏆 Galletas — Blanco 5 - 7 Color
+    // ⚽ Blanco: Lucho x2, Diego · Color: Thomas x3, Benja x2 · 🏆 MVP: Thomas
+    title = `${emoji} ${groupName} — ${teamA} ${match.team_a_score ?? 0} - ${match.team_b_score ?? 0} ${teamB}`;
+    const parts: string[] = [];
+    const ga = scorersLine(match.players, 'a');
+    const gb = scorersLine(match.players, 'b');
+    if (ga) parts.push(`⚽ ${teamA}: ${ga}`);
+    if (gb) parts.push(`⚽ ${teamB}: ${gb}`);
+    if (match.mvp_name) parts.push(`🏆 MVP: ${match.mvp_name}`);
+    if (shortDate) parts.push(shortDate);
+    description = parts.join(' · ') || `Resultado ${match.team_a_score ?? 0} - ${match.team_b_score ?? 0}`;
   } else if (match.phase === 'voting') {
-    description = `🗳️ Vota tu MVP en ${groupName}`;
+    const score = match.team_a_score != null && match.team_b_score != null
+      ? `${teamA} ${match.team_a_score} - ${match.team_b_score} ${teamB} · ` : '';
+    description = `${score}🗳️ Vota tu MVP en ${groupName}`;
+  } else if (match.phase === 'titulares') {
+    // ⭐ Galletas — Titulares definidos
+    // Titulares: A, B, C… · Banca: 1º X, 2º Y
+    const starters = startersOf(match.players);
+    const bench = benchOf(match.players);
+    const parts: string[] = [];
+    if (starters.length) parts.push(`Titulares (${starters.length}): ${names(starters)}`);
+    if (bench.length) parts.push(`Banca: ${bench.map((p, i) => `${p.bench_order ?? i + 1}º ${shortName(p.name)}`).join(', ')}`);
+    description = parts.join(' · ') || formatDateLabel(match.date, match.time, match.location) || `Partido de ${groupName}`;
+  } else if (match.phase === 'equipos' || match.phase === 'playing') {
+    // 👕 Galletas — Equipos armados
+    // Blanco: A, B, C · Color: D, E, F · Banca: X, Y
+    const a = startersOf(match.players, 'a');
+    const b = startersOf(match.players, 'b');
+    const bench = benchOf(match.players);
+    const parts: string[] = [];
+    if (a.length) parts.push(`${teamA}: ${names(a)}`);
+    if (b.length) parts.push(`${teamB}: ${names(b)}`);
+    if (bench.length) parts.push(`Banca: ${names(bench)}`);
+    if (!a.length && !b.length) {
+      const starters = startersOf(match.players);
+      if (starters.length) parts.push(`Titulares: ${names(starters)}`);
+    }
+    description = parts.join(' · ') || formatDateLabel(match.date, match.time, match.location) || `Partido de ${groupName}`;
   } else {
     description = formatDateLabel(match.date, match.time, match.location) || `Partido de ${groupName}`;
   }
 
-  // Cache-bust the OG image when phase changes. WhatsApp caches aggressively
-  // — including the phase in the query helps when the same match shifts state.
-  const ogImage = `https://imsports.app/og/match/${params.id}?phase=${match.phase}`;
+  // Cache-bust the OG image when the content changes (phase, marcador, MVP,
+  // titulares, goles). WhatsApp cachea agresivo por URL.
+  const ogImage = `https://imsports.app/og/match/${params.id}?phase=${match.phase}&v=${encodeURIComponent(ogVersion(match))}`;
 
   return {
     title,

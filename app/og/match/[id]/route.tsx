@@ -5,7 +5,10 @@
  * Output: image/png para que WhatsApp/Twitter/Slack rendericen el preview.
  */
 import { ImageResponse } from 'next/og';
-import { fetchMatchForOG, PHASE_LABELS, PHASE_EMOJI } from '@/lib/supabase';
+import {
+  fetchMatchForOG, PHASE_LABELS, PHASE_EMOJI,
+  scorersLine, startersOf, benchOf, shortName, formatShortDate,
+} from '@/lib/supabase';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -37,56 +40,112 @@ export async function GET(
   const groupName = match.group?.name || 'IM SPORTS';
 
   // ─── Render content per phase (separate functions for clarity) ──
-  function renderClosed() {
+  const teamA = match.team_a_name || 'Equipo A';
+  const teamB = match.team_b_name || 'Equipo B';
+  const dateLabel = formatShortDate(match.date);
+
+  // Columna de nombres (para titulares / equipos)
+  function nameColumn(title: string, color: string, items: string[], width: number) {
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-      }}>
-        <div style={{ display: 'flex', fontSize: 32, color: COLORS.gray, marginBottom: 18 }}>
-          {groupName}
+      <div style={{ display: 'flex', flexDirection: 'column', width, gap: 4 }}>
+        <div style={{ display: 'flex', fontSize: 26, fontWeight: 800, color, marginBottom: 6 }}>{title}</div>
+        {items.length === 0 ? (
+          <div style={{ display: 'flex', fontSize: 22, color: COLORS.gray }}>—</div>
+        ) : items.map((n, i) => (
+          <div key={i} style={{ display: 'flex', fontSize: 23, color: COLORS.white, lineHeight: 1.25 }}>{n}</div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderClosed() {
+    const ga = scorersLine(match!.players, 'a');
+    const gb = scorersLine(match!.players, 'b');
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+        <div style={{ display: 'flex', fontSize: 28, color: COLORS.gray, marginBottom: 10 }}>
+          {groupName}{dateLabel ? ` · ${dateLabel}` : ''}
         </div>
-        <div style={{
-          display: 'flex',
-          fontSize: 32,
-          color: COLORS.grayLight,
-          marginBottom: 8,
-          gap: 24,
-          alignItems: 'baseline',
-        }}>
-          <span>{match!.team_a_name || 'Equipo A'}</span>
-          <span style={{ color: COLORS.gray, fontSize: 22 }}>vs</span>
-          <span>{match!.team_b_name || 'Equipo B'}</span>
+        {/* Marcador con nombres a cada lado */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28, width: '100%' }}>
+          <div style={{ display: 'flex', flex: 1, justifyContent: 'flex-end', fontSize: 34, fontWeight: 700, color: COLORS.grayLight }}>{teamA}</div>
+          <div style={{ display: 'flex', fontSize: 130, fontWeight: 800, letterSpacing: -6, lineHeight: 1, gap: 18, alignItems: 'center' }}>
+            <span>{match!.team_a_score ?? 0}</span>
+            <span style={{ color: COLORS.gray, fontSize: 70, fontWeight: 400 }}>-</span>
+            <span>{match!.team_b_score ?? 0}</span>
+          </div>
+          <div style={{ display: 'flex', flex: 1, justifyContent: 'flex-start', fontSize: 34, fontWeight: 700, color: COLORS.grayLight }}>{teamB}</div>
         </div>
-        <div style={{
-          display: 'flex',
-          fontSize: 180,
-          fontWeight: 800,
-          letterSpacing: -8,
-          lineHeight: 1,
-          gap: 30,
-          alignItems: 'center',
-        }}>
-          <span>{match!.team_a_score ?? 0}</span>
-          <span style={{ color: COLORS.gray, fontSize: 100, fontWeight: 400 }}>-</span>
-          <span>{match!.team_b_score ?? 0}</span>
-        </div>
-        {match!.mvp ? (
-          <div style={{
-            display: 'flex',
-            marginTop: 30,
-            fontSize: 30,
-            color: COLORS.orange,
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <span>🌟 MVP:</span>
-            <span style={{ fontWeight: 700, color: COLORS.white }}>{match!.mvp.display_name}</span>
+        {/* Goleadores */}
+        {(ga || gb) ? (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 40, width: '100%', marginTop: 14 }}>
+            <div style={{ display: 'flex', flex: 1, justifyContent: 'flex-end', fontSize: 22, color: COLORS.grayLight, textAlign: 'right' }}>
+              {ga ? `⚽ ${ga}` : ''}
+            </div>
+            <div style={{ display: 'flex', width: 40 }} />
+            <div style={{ display: 'flex', flex: 1, justifyContent: 'flex-start', fontSize: 22, color: COLORS.grayLight }}>
+              {gb ? `⚽ ${gb}` : ''}
+            </div>
           </div>
         ) : (
           <div style={{ display: 'flex' }} />
         )}
+        {match!.mvp_name ? (
+          <div style={{
+            display: 'flex', marginTop: 18, fontSize: 30, color: COLORS.orange, alignItems: 'center', gap: 10,
+            padding: '8px 26px', border: `2px solid ${COLORS.orange}`, borderRadius: 999,
+          }}>
+            <span>🏆 MVP</span>
+            <span style={{ fontWeight: 800, color: COLORS.white }}>{match!.mvp_name}</span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex' }} />
+        )}
+      </div>
+    );
+  }
+
+  // ⭐ Titulares definidos: lista de titulares en 2 columnas + banca ordenada
+  function renderTitulares() {
+    const starters = startersOf(match!.players).map((p) => shortName(p.name));
+    const bench = benchOf(match!.players).map((p, i) => `${p.bench_order ?? i + 1}º ${shortName(p.name)}`);
+    const half = Math.ceil(starters.length / 2);
+    const col1 = starters.slice(0, half);
+    const col2 = starters.slice(half);
+    if (starters.length === 0) return renderOpen();
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+        <div style={{ display: 'flex', fontSize: 40, fontWeight: 800, marginBottom: 4 }}>⭐ Titulares</div>
+        <div style={{ display: 'flex', fontSize: 24, color: COLORS.gray, marginBottom: 18 }}>
+          {groupName}{dateLabel ? ` · ${dateLabel}` : ''}{match!.time ? ` · ${match!.time}` : ''}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 50, width: '100%' }}>
+          {nameColumn(`Titulares (${starters.length})`, COLORS.green, col1, 300)}
+          {nameColumn(' ', COLORS.green, col2, 300)}
+          {nameColumn('🪑 Banca', COLORS.orange, bench, 300)}
+        </div>
+      </div>
+    );
+  }
+
+  // 👕 Equipos armados / en juego: dos columnas por equipo + banca
+  function renderEquipos() {
+    const a = startersOf(match!.players, 'a').map((p) => shortName(p.name));
+    const b = startersOf(match!.players, 'b').map((p) => shortName(p.name));
+    const bench = benchOf(match!.players).map((p, i) => `${p.bench_order ?? i + 1}º ${shortName(p.name)}`);
+    if (a.length === 0 && b.length === 0) return renderTitulares();
+    const label = phase === 'playing' ? '⚽ En juego' : '👕 Equipos';
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+        <div style={{ display: 'flex', fontSize: 40, fontWeight: 800, marginBottom: 4 }}>{label}</div>
+        <div style={{ display: 'flex', fontSize: 24, color: COLORS.gray, marginBottom: 18 }}>
+          {groupName}{dateLabel ? ` · ${dateLabel}` : ''}{match!.time ? ` · ${match!.time}` : ''}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 50, width: '100%' }}>
+          {nameColumn(teamA, COLORS.white, a, 300)}
+          {nameColumn(teamB, COLORS.orange, b, 300)}
+          {nameColumn('🪑 Banca', COLORS.gray, bench, 300)}
+        </div>
       </div>
     );
   }
@@ -169,7 +228,12 @@ export async function GET(
   let content;
   if (phase === 'closed') content = renderClosed();
   else if (phase === 'voting') content = renderVoting();
+  else if (phase === 'titulares') content = renderTitulares();
+  else if (phase === 'equipos' || phase === 'playing') content = renderEquipos();
   else content = renderOpen();
+
+  // Con listas de nombres el logo ocupa menos espacio
+  const compact = phase === 'titulares' || phase === 'equipos' || phase === 'playing' || phase === 'closed';
 
   return new ImageResponse(
     (
@@ -182,24 +246,24 @@ export async function GET(
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: 70,
+          padding: compact ? 40 : 70,
           color: COLORS.white,
           fontFamily: 'sans-serif',
           position: 'relative',
         }}
       >
         {/* Logo lockup */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 50 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: compact ? 18 : 50 }}>
           <div style={{
             display: 'flex',
-            width: 80,
-            height: 80,
+            width: compact ? 52 : 80,
+            height: compact ? 52 : 80,
             background: COLORS.green,
-            borderRadius: 18,
+            borderRadius: compact ? 12 : 18,
             alignItems: 'center',
             justifyContent: 'center',
             color: COLORS.bg,
-            fontSize: 40,
+            fontSize: compact ? 26 : 40,
             fontWeight: 800,
             letterSpacing: -2,
           }}>
@@ -207,7 +271,7 @@ export async function GET(
           </div>
           <div style={{
             display: 'flex',
-            fontSize: 44,
+            fontSize: compact ? 30 : 44,
             fontWeight: 800,
             letterSpacing: -1.5,
             color: COLORS.white,
@@ -237,7 +301,7 @@ export async function GET(
       width: 1200,
       height: 630,
       headers: {
-        'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+        'Cache-Control': 'public, max-age=600, s-maxage=600',
         'Content-Type': 'image/png',
       },
     }
