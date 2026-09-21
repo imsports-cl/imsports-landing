@@ -37,7 +37,7 @@ interface Lineup {
 const MOTIVOS: Record<string, string> = {
   no_pago: '💸 No pagó a tiempo',
   atraso: '⏰ Llegó tarde',
-  bajo_tarde: '🚪 Se bajó tras el anuncio',
+  bajo_tarde: '🚪 Se bajó pasadas las 13:00',
 };
 interface Miembro { user_id: string; nombre: string }
 interface PanelData { fechas: string[]; ranking: RankRow[]; registrados: RegRow[]; lineup: Lineup; miembros: Miembro[]; }
@@ -132,8 +132,8 @@ export default function AdminPage() {
     if (!session || !data?.lineup) return;
     const msg = `¿Bajar a ${nombre} de esta pichanga?\n\n` +
       `Queda fuera de titulares y banca, y NO asegura cupo para las próximas fechas.\n\n` +
-      `Aceptar = además pierde cupo la próxima fecha (se bajó con titulares ya anunciados).\n` +
-      `Cancelar = solo lo bajo, sin sanción.`;
+      `Aceptar = además pierde cupo la próxima fecha (avisó pasadas las 13:00).\n` +
+      `Cancelar = avisó dentro de plazo, sin sanción.`;
     // eslint-disable-next-line no-alert
     const sancionar = window.confirm(msg);
     setBusy(true);
@@ -353,7 +353,8 @@ export default function AdminPage() {
                       </div>
                     )}
                     <p style={{ color: S.dim, fontSize: 12, marginBottom: 0, marginTop: 12 }}>
-                      Los que queden en banca aseguran cupo las próximas 4 fechas (se agregan solos al cerrar el partido).
+                      Los que queden en banca aseguran cupo las próximas 4 fechas (se agregan solos al cerrar el partido),
+                      salvo quien haya confirmado <b>después</b> de anunciados los titulares: juega si hay cupo, pero no asegura.
                       Si alguien avisó que no va, usa <b>“Se bajó”</b> — así no queda como banca ni asegura cupo.
                     </p>
                   </section>
@@ -478,7 +479,7 @@ export default function AdminPage() {
                         style={{ background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '8px 10px' }}>
                         <option value="atraso">⏰ Llegó tarde</option>
                         <option value="no_pago">💸 No pagó a tiempo</option>
-                        <option value="bajo_tarde">🚪 Se bajó tras el anuncio</option>
+                        <option value="bajo_tarde">🚪 Se bajó pasadas las 13:00</option>
                       </select>
                       <button disabled={!sancUser || busy}
                         onClick={async () => { await mutarCupo('sancionar', sancUser, L.match.fecha, sancMotivo); setSancUser(''); }}
