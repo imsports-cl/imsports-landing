@@ -32,8 +32,13 @@ interface Lineup {
   asegurados_sin_confirmar: { user_id: string; nombre: string; asegura_hasta: string; estado: string }[];
   cupos_asegurados: CupoRow[];
   sanciones: SancionRow[];
+  bajados: { user_id: string; nombre: string; sancionado: boolean }[];
 }
-const MOTIVOS: Record<string, string> = { no_pago: '💸 No pagó a tiempo', atraso: '⏰ Llegó tarde' };
+const MOTIVOS: Record<string, string> = {
+  no_pago: '💸 No pagó a tiempo',
+  atraso: '⏰ Llegó tarde',
+  bajo_tarde: '🚪 Se bajó tras el anuncio',
+};
 interface Miembro { user_id: string; nombre: string }
 interface PanelData { fechas: string[]; ranking: RankRow[]; registrados: RegRow[]; lineup: Lineup; miembros: Miembro[]; }
 
@@ -117,6 +122,39 @@ export default function AdminPage() {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion, user_id, hasta, reason }),
+      });
+      await cargar(session.access_token);
+    } finally { setBusy(false); }
+  };
+
+  /** El jugador avisó por fuera que no va: queda fuera y NO asegura cupo. */
+  const bajarJugador = async (user_id: string, nombre: string) => {
+    if (!session || !data?.lineup) return;
+    const msg = `¿Bajar a ${nombre} de esta pichanga?\n\n` +
+      `Queda fuera de titulares y banca, y NO asegura cupo para las próximas fechas.\n\n` +
+      `Aceptar = además pierde cupo la próxima fecha (se bajó con titulares ya anunciados).\n` +
+      `Cancelar = solo lo bajo, sin sanción.`;
+    // eslint-disable-next-line no-alert
+    const sancionar = window.confirm(msg);
+    setBusy(true);
+    try {
+      await fetch('/admin/api', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'bajar', user_id, match_id: data.lineup.match.id, sancionar }),
+      });
+      await cargar(session.access_token);
+    } finally { setBusy(false); }
+  };
+
+  const reincorporar = async (user_id: string) => {
+    if (!session || !data?.lineup) return;
+    setBusy(true);
+    try {
+      await fetch('/admin/api', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'reincorporar', user_id, match_id: data.lineup.match.id }),
       });
       await cargar(session.access_token);
     } finally { setBusy(false); }
@@ -245,6 +283,13 @@ export default function AdminPage() {
                   </td>
                   <td style={{ ...td, fontWeight: 800, color: sinPuntos(j) ? S.dim : destacar ? S.text : S.dim, textDecoration: sinPuntos(j) ? 'line-through' : undefined }}>{j.pj}</td>
                   <td style={{ ...td, color: S.dim, fontSize: 13 }}>{j.orden}º · {horaCorta(j.confirmo_at)}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    <button onClick={() => bajarJugador(j.user_id, j.nombre)} disabled={busy}
+                      title="El jugador avisó que no va"
+                      style={{ background: 'none', border: `1px solid ${S.border}`, color: S.dim, borderRadius: 8, padding: '3px 9px', cursor: 'pointer', fontSize: 12 }}>
+                      Se bajó
+                    </button>
+                  </td>
                 </tr>
               );
 
@@ -288,7 +333,7 @@ export default function AdminPage() {
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead><tr>
-                          <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Cómo entra</th><th style={th}>Asist.</th><th style={th}>Confirmó</th>
+                          <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Cómo entra</th><th style={th}>Asist.</th><th style={th}>Confirmó</th><th style={th}></th>
                         </tr></thead>
                         <tbody>{titulares.map((j) => filaJ(j, true))}</tbody>
                       </table>
@@ -301,7 +346,7 @@ export default function AdminPage() {
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead><tr>
-                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}></th><th style={th}>Asist.</th><th style={th}>Confirmó</th>
+                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}></th><th style={th}>Asist.</th><th style={th}>Confirmó</th><th style={th}></th>
                           </tr></thead>
                           <tbody>{banca.map((j) => filaJ(j, false))}</tbody>
                         </table>
@@ -309,8 +354,34 @@ export default function AdminPage() {
                     )}
                     <p style={{ color: S.dim, fontSize: 12, marginBottom: 0, marginTop: 12 }}>
                       Los que queden en banca aseguran cupo las próximas 4 fechas (se agregan solos al cerrar el partido).
+                      Si alguien avisó que no va, usa <b>“Se bajó”</b> — así no queda como banca ni asegura cupo.
                     </p>
                   </section>
+
+                  {L.bajados?.length > 0 && (
+                    <section style={{ ...box, marginBottom: 16 }}>
+                      <h3 style={{ margin: '0 0 10px', fontSize: 15, color: S.dim }}>🚪 Se bajaron ({L.bajados.length})</h3>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <tbody>
+                          {L.bajados.map((b) => (
+                            <tr key={b.user_id}>
+                              <td style={{ ...td, fontWeight: 600 }}>{b.nombre}</td>
+                              <td style={{ ...td, color: S.dim, fontSize: 13 }}>
+                                No cuenta como banca · no asegura cupo
+                                {b.sancionado && <span style={{ color: '#FF8A8A' }}> · ⛔ pierde cupo la próxima</span>}
+                              </td>
+                              <td style={{ ...td, textAlign: 'right' }}>
+                                <button onClick={() => reincorporar(b.user_id)} disabled={busy}
+                                  style={{ background: 'none', border: `1px solid ${S.border}`, color: S.accent, borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+                                  Reincorporar
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </section>
+                  )}
 
                   <section style={box}>
                     <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>🎟️ Cupos asegurados vigentes</h3>
@@ -407,6 +478,7 @@ export default function AdminPage() {
                         style={{ background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '8px 10px' }}>
                         <option value="atraso">⏰ Llegó tarde</option>
                         <option value="no_pago">💸 No pagó a tiempo</option>
+                        <option value="bajo_tarde">🚪 Se bajó tras el anuncio</option>
                       </select>
                       <button disabled={!sancUser || busy}
                         onClick={async () => { await mutarCupo('sancionar', sancUser, L.match.fecha, sancMotivo); setSancUser(''); }}

@@ -48,7 +48,17 @@ export async function GET(req: NextRequest) {
   if (panel.error) return NextResponse.json({ error: panel.error.message }, { status: 500 });
   if (lineup.error) return NextResponse.json({ error: lineup.error.message }, { status: 500 });
 
-  return NextResponse.json({ ...panel.data, lineup: lineup.data, miembros: miembros.data || [] });
+  // Los que se bajaron (declined): no son banca ni aseguran cupo
+  const matchId = (lineup.data as any)?.match?.id;
+  const bajados = matchId
+    ? (await service.rpc('admin_lineup_bajados', { p_match_id: matchId })).data || []
+    : [];
+
+  return NextResponse.json({
+    ...panel.data,
+    lineup: { ...(lineup.data as any), bajados },
+    miembros: miembros.data || [],
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -56,9 +66,32 @@ export async function POST(req: NextRequest) {
   if (auth.error) return auth.error;
 
   const body = await req.json().catch(() => ({}));
-  const { accion, user_id, hasta, reason } = body as {
+  const { accion, user_id, hasta, reason, match_id, sancionar } = body as {
     accion?: string; user_id?: string; hasta?: string; reason?: string;
+    match_id?: string; sancionar?: boolean;
   };
+
+  // ── El jugador se bajó (avisó por fuera de la app) ──
+  // Queda 'declined': no es banca ni asegura cupo. Si los titulares ya estaban
+  // anunciados, pierde cupo la próxima fecha.
+  if (accion === 'bajar') {
+    if (!user_id || !match_id) return NextResponse.json({ error: 'faltan datos' }, { status: 400 });
+    const { data, error } = await service.rpc('admin_drop_player', {
+      p_match_id: match_id, p_user_id: user_id,
+      p_sancionar: sancionar === undefined ? null : sancionar,
+    });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(data);
+  }
+
+  if (accion === 'reincorporar') {
+    if (!user_id || !match_id) return NextResponse.json({ error: 'faltan datos' }, { status: 400 });
+    const { error } = await service.from('match_confirmations')
+      .update({ status: 'confirmed', is_starter: null, bench_order: null })
+      .eq('match_id', match_id).eq('user_id', user_id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
 
   // Grupo del partido vigente (mismo criterio que admin_lineup)
   const { data: grupo } = await service
