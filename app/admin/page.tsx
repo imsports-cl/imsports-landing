@@ -488,6 +488,50 @@ export default function AdminPage() {
                       </button>
                     </div>
                   </section>
+
+                  <details style={{ ...box, marginTop: 16 }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 15 }}>
+                      📋 Reglas de cupos <span style={{ color: S.dim, fontWeight: 400, fontSize: 13 }}>— cómo se arma esta lista</span>
+                    </summary>
+
+                    <div style={{ marginTop: 16, fontSize: 14, lineHeight: 1.7 }}>
+                      <p style={{ color: S.dim, marginTop: 0 }}>
+                        Solo se consideran los que <b style={{ color: S.text }}>confirmaron</b>. En este orden:
+                      </p>
+                      <ol style={{ paddingLeft: 20, margin: '0 0 18px' }}>
+                        <li><b style={{ color: S.accent }}>🌟 MVP de la fecha pasada</b> — solo para la fecha siguiente.</li>
+                        <li><b style={{ color: S.accent }}>🎩 Organizador</b> — quien creó el partido, solo esa fecha.</li>
+                        <li><b style={{ color: S.accent }}>🪑 Los que quedaron en banca</b> — aseguran las <b>4 fechas siguientes</b>, y el cupo se mantiene aunque alcancen a jugar antes.</li>
+                        <li><b>📊 El resto por asistencias</b> de las últimas 12 pichangas, de mayor a menor.</li>
+                        <li><b>⏱️ Empate</b> en asistencias → clasifica <b>el que confirmó primero</b>.</li>
+                      </ol>
+
+                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>⛔ Pierde cupo (dura una fecha)</p>
+                      <ul style={{ paddingLeft: 20, margin: '0 0 18px', color: S.dim }}>
+                        <li>💸 No pagó a tiempo · ⏰ Llegó tarde · 🚪 Se bajó pasadas las 13:00.</li>
+                        <li>Queda al <b style={{ color: S.text }}>final de la lista y sin puntos</b>; entre sancionados ordena la hora de confirmación.</li>
+                        <li>Si igual sobra cupo, juega: solo baja de prioridad.</li>
+                      </ul>
+
+                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#F6C453' }}>⚖️ Neteo</p>
+                      <p style={{ margin: '0 0 18px', color: S.dim }}>
+                        Si alguien <b style={{ color: S.text }}>asegura cupo y lo pierde</b> en la misma fecha, se anulan:
+                        entra por la regla de puntajes, conservando sus asistencias.
+                      </p>
+
+                      <p style={{ margin: '0 0 6px', fontWeight: 700 }}>🚪 Bajarse</p>
+                      <ul style={{ paddingLeft: 20, margin: '0 0 18px', color: S.dim }}>
+                        <li>Plazo: hasta las <b style={{ color: S.text }}>13:00 del día de la pichanga</b>. Después, pierde cupo la fecha siguiente.</li>
+                        <li>Si avisó por fuera de la app, bájalo con <b style={{ color: S.text }}>“Se bajó”</b> y no con “Banca”: así no arrastra cupo asegurado.</li>
+                      </ul>
+
+                      <p style={{ margin: '0 0 6px', fontWeight: 700 }}>🕐 Confirmar tarde</p>
+                      <p style={{ margin: 0, color: S.dim }}>
+                        Quien confirma <b style={{ color: S.text }}>después</b> de anunciados los titulares entra a la banca
+                        por orden de confirmación, pero <b style={{ color: S.text }}>no asegura</b> las 4 fechas.
+                      </p>
+                    </div>
+                  </details>
                 </>
               );
             })()}
