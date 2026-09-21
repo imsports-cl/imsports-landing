@@ -56,12 +56,15 @@ export function shortName(name: string): string {
   return out.length > 14 ? out.slice(0, 13) + '…' : out;
 }
 
-/** Fecha corta en español: "dom 14 sep" */
+/** Fecha corta en español: "dom 14 sept".
+ *  La fecha del partido se guarda como timestamp cuyo DÍA en UTC es el día
+ *  real (la app guarda 00:00Z o la hora local convertida); formatear en
+ *  America/Santiago la corría un día hacia atrás. */
 export function formatShortDate(date: string | null): string {
   if (!date) return '';
   try {
     return new Date(date).toLocaleDateString('es-CL', {
-      weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Santiago',
+      weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
     });
   } catch {
     return date;
