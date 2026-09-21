@@ -20,6 +20,7 @@ interface LineupPlayer {
   user_id: string; nombre: string; pj: number; orden: number; pos: number;
   titular: boolean; asegurado: boolean; es_mvp: boolean; es_organizador: boolean;
   sancionado: boolean; sancion_motivo: string | null; neteado: boolean;
+  confirmo_tarde: boolean;
   asegura_hasta: string | null; confirmo_at: string | null;
 }
 interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean; neteado: boolean }
@@ -266,7 +267,8 @@ export default function AdminPage() {
               const titulares = L.jugadores.filter((j) => j.titular);
               const banca = L.jugadores.filter((j) => !j.titular);
               const comoEntra = (j: LineupPlayer) =>
-                j.neteado ? `⚖️ Netea · aseguraba y perdió cupo → entra por puntaje`
+                j.confirmo_tarde ? '🕐 Confirmó tras el anuncio · va al final'
+                : j.neteado ? `⚖️ Netea · aseguraba y perdió cupo → entra por puntaje`
                 : j.sancionado ? `⛔ Pierde cupo · ${MOTIVOS[j.sancion_motivo || ''] || j.sancion_motivo}`
                 : j.es_mvp ? '🌟 MVP fecha pasada'
                 : j.es_organizador ? '🎩 Organizador'
@@ -278,8 +280,8 @@ export default function AdminPage() {
                 <tr key={j.user_id} style={sinPuntos(j) ? { background: 'rgba(255,107,107,0.07)' } : j.neteado ? { background: 'rgba(246,196,83,0.06)' } : undefined}>
                   <td style={{ ...td, color: S.dim, width: 34 }}>{j.pos}</td>
                   <td style={{ ...td, fontWeight: 700 }}>{j.nombre}</td>
-                  <td style={{ ...td, fontSize: 13, color: sinPuntos(j) ? '#FF8A8A' : j.neteado ? '#F6C453' : j.asegurado ? S.accent : S.dim }}>
-                    {destacar || j.sancionado ? comoEntra(j) : '—'}
+                  <td style={{ ...td, fontSize: 13, color: sinPuntos(j) ? '#FF8A8A' : j.neteado || j.confirmo_tarde ? '#F6C453' : j.asegurado ? S.accent : S.dim }}>
+                    {destacar || j.sancionado || j.confirmo_tarde ? comoEntra(j) : '—'}
                   </td>
                   <td style={{ ...td, fontWeight: 800, color: sinPuntos(j) ? S.dim : destacar ? S.text : S.dim, textDecoration: sinPuntos(j) ? 'line-through' : undefined }}>{j.pj}</td>
                   <td style={{ ...td, color: S.dim, fontSize: 13 }}>{j.orden}º · {horaCorta(j.confirmo_at)}</td>
@@ -526,10 +528,10 @@ export default function AdminPage() {
                       </ul>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700 }}>🕐 Confirmar tarde</p>
-                      <p style={{ margin: 0, color: S.dim }}>
-                        Quien confirma <b style={{ color: S.text }}>después</b> de anunciados los titulares entra a la banca
-                        por orden de confirmación, pero <b style={{ color: S.text }}>no asegura</b> las 4 fechas.
-                      </p>
+                      <ul style={{ paddingLeft: 20, margin: 0, color: S.dim }}>
+                        <li>Quien confirma <b style={{ color: S.text }}>después</b> de anunciados los titulares <b style={{ color: S.text }}>no puede ser titular</b> esa fecha: la lista ya estaba cerrada. Va al final de la banca, aunque traiga cupo asegurado de antes.</li>
+                        <li>Tampoco <b style={{ color: S.text }}>genera</b> cupo asegurado si termina en banca.</li>
+                      </ul>
                     </div>
                   </details>
                 </>
