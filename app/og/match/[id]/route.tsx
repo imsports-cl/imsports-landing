@@ -48,7 +48,7 @@ export async function GET(
   function nameColumn(title: string, color: string, items: string[], width: number) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', width, gap: 4 }}>
-        <div style={{ display: 'flex', fontSize: 26, fontWeight: 800, color, marginBottom: 6 }}>{title}</div>
+        <div style={{ display: 'flex', fontSize: 26, fontWeight: 800, color, marginBottom: 6, opacity: title.trim() ? 1 : 0, minHeight: 32 }}>{title.trim() || '·'}</div>
         {items.length === 0 ? (
           <div style={{ display: 'flex', fontSize: 22, color: COLORS.gray }}>—</div>
         ) : items.map((n, i) => (
