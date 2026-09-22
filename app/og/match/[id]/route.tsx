@@ -7,7 +7,7 @@
 import { ImageResponse } from 'next/og';
 import {
   fetchMatchForOG, PHASE_LABELS, PHASE_EMOJI,
-  scorersLine, startersOf, benchOf, shortName, formatShortDate,
+  startersOf, benchOf, shortName, formatShortDate,
 } from '@/lib/supabase';
 
 export const runtime = 'edge';
@@ -58,9 +58,22 @@ export async function GET(
     );
   }
 
+  // Líneas de goleadores por equipo (+ el MVP aunque no haya marcado)
+  function scorerLines(team: 'a' | 'b') {
+    const mvpId = match!.mvp_user_id;
+    return match!.players
+      .filter((p) => p.team === team && (p.goals > 0 || p.user_id === mvpId))
+      .sort((a, b) => b.goals - a.goals || (a.user_id === mvpId ? -1 : 0))
+      .map((p) => {
+        const mvp = p.user_id === mvpId;
+        const goals = p.goals > 0 ? ` ⚽${p.goals > 1 ? ` x${p.goals}` : ''}` : '';
+        return { mvp, text: `${mvp ? '🏆 ' : ''}${shortName(p.name)}${goals}` };
+      });
+  }
+
   function renderClosed() {
-    const ga = scorersLine(match!.players, 'a');
-    const gb = scorersLine(match!.players, 'b');
+    const la = scorerLines('a');
+    const lb = scorerLines('b');
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
         <div style={{ display: 'flex', fontSize: 28, color: COLORS.gray, marginBottom: 10 }}>
@@ -76,21 +89,25 @@ export async function GET(
           </div>
           <div style={{ display: 'flex', flex: 1, justifyContent: 'flex-start', fontSize: 34, fontWeight: 700, color: COLORS.grayLight }}>{teamB}</div>
         </div>
-        {/* Goleadores */}
-        {(ga || gb) ? (
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 40, width: '100%', marginTop: 14 }}>
-            <div style={{ display: 'flex', flex: 1, justifyContent: 'flex-end', fontSize: 22, color: COLORS.grayLight, textAlign: 'right' }}>
-              {ga ? `⚽ ${ga}` : ''}
+        {/* Goleadores: uno por línea bajo cada equipo, MVP marcado con 🏆 */}
+        {(la.length || lb.length) ? (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 40, width: '100%', marginTop: 12 }}>
+            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+              {la.map((l, i) => (
+                <div key={i} style={{ display: 'flex', fontSize: 23, color: l.mvp ? COLORS.white : COLORS.grayLight, fontWeight: l.mvp ? 700 : 400, lineHeight: 1.25 }}>{l.text}</div>
+              ))}
             </div>
             <div style={{ display: 'flex', width: 40 }} />
-            <div style={{ display: 'flex', flex: 1, justifyContent: 'flex-start', fontSize: 22, color: COLORS.grayLight }}>
-              {gb ? `⚽ ${gb}` : ''}
+            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+              {lb.map((l, i) => (
+                <div key={i} style={{ display: 'flex', fontSize: 23, color: l.mvp ? COLORS.white : COLORS.grayLight, fontWeight: l.mvp ? 700 : 400, lineHeight: 1.25 }}>{l.text}</div>
+              ))}
             </div>
           </div>
         ) : (
           <div style={{ display: 'flex' }} />
         )}
-        {match!.mvp_name ? (
+        {match!.mvp_name && !match!.players.some((p) => p.user_id === match!.mvp_user_id && p.team) ? (
           <div style={{
             display: 'flex', marginTop: 18, fontSize: 30, color: COLORS.orange, alignItems: 'center', gap: 10,
             padding: '8px 26px', border: `2px solid ${COLORS.orange}`, borderRadius: 999,
