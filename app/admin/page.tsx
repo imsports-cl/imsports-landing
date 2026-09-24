@@ -6,6 +6,7 @@
  * Login con Google o email+clave (cuentas de la app).
  */
 import { useEffect, useMemo, useState } from 'react';
+import Novedades from './Novedades';
 import { createClient, type Session } from '@supabase/supabase-js';
 
 const supa = createClient(
@@ -84,7 +85,7 @@ export default function AdminPage() {
   const [loginErr, setLoginErr] = useState('');
   const [data, setData] = useState<PanelData | null>(null);
   const [denied, setDenied] = useState(false);
-  const [tab, setTab] = useState<'titulares' | 'ranking' | 'registrados' | 'moderacion'>('titulares');
+  const [tab, setTab] = useState<'titulares' | 'ranking' | 'registrados' | 'moderacion' | 'novedades'>('titulares');
   const [mod, setMod] = useState<ModData | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [cupos, setCupos] = useState(12);
@@ -248,7 +249,7 @@ export default function AdminPage() {
         ) : (
           <>
             <nav style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
-              {(['titulares', 'ranking', 'registrados', 'moderacion'] as const).map((t) => (
+              {(['titulares', 'ranking', 'registrados', 'moderacion', 'novedades'] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   style={{ padding: '8px 16px', borderRadius: 100, border: `1px solid ${tab === t ? S.accent : S.border}`, background: tab === t ? 'rgba(0,230,118,0.12)' : 'transparent', color: tab === t ? S.accent : S.dim, fontWeight: 700, cursor: 'pointer' }}>
                   {t === 'titulares'
@@ -257,6 +258,8 @@ export default function AdminPage() {
                     ? `⚽ Últimas 12 pichangas`
                     : t === 'registrados'
                     ? `👥 Registrados (${data.registrados.length})`
+                    : t === 'novedades'
+                    ? `📣 Novedades`
                     : `🛡️ Moderación${mod?.denuncias.length ? ` (${mod.denuncias.length})` : ''}`}
                 </button>
               ))}
@@ -586,6 +589,8 @@ export default function AdminPage() {
                 </div>
               </section>
             )}
+
+            {tab === 'novedades' && session && <Novedades token={session.access_token} />}
 
             {tab === 'moderacion' && (
               <section style={box}>
