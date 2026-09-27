@@ -358,11 +358,36 @@ export default function AdminPage() {
 
                   <section style={{ ...box, marginBottom: 16 }}>
                     <h3 style={{ margin: '0 0 12px', fontSize: 15, color: S.dim }}>🪑 BANCA ({banca.length})</h3>
+
+                    {/* Traían cupo asegurado pero respondieron fuera del corte */}
+                    {banca.some((j) => j.cupo_caducado) && (
+                      <div style={{
+                        border: '1px solid #B7791F', background: 'rgba(183,121,31,0.08)',
+                        borderRadius: 10, padding: '10px 12px', marginBottom: 12,
+                      }}>
+                        <b style={{ color: '#F6C453', fontSize: 14 }}>
+                          ⌛ Aseguraban cupo pero se les caducó ({banca.filter((j) => j.cupo_caducado).length})
+                        </b>
+                        <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>
+                          Respondieron fuera de los {L.match.cupos} primeros, así que compitieron por puntaje y no alcanzaron:
+                        </p>
+                        <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: S.dim, fontSize: 13 }}>
+                          {banca.filter((j) => j.cupo_caducado).map((j) => (
+                            <li key={j.user_id}>
+                              <b style={{ color: S.text }}>{j.nombre}</b> — confirmó{' '}
+                              <b style={{ color: '#F6C453' }}>{j.orden}º</b> ({horaCorta(j.confirmo_at)}),
+                              {' '}{j.pj} asist. · el cupo le sigue vigente hasta {fechaCorta(j.asegura_hasta)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
                     {banca.length === 0 ? <p style={{ color: S.dim, fontSize: 13 }}>Sin banca.</p> : (
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead><tr>
-                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}></th><th style={th}>Asist.</th><th style={th} title="Puesto en la fila de confirmados: solo cuentan los que dijeron que van">Confirmó · nº</th><th style={th}></th>
+                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Por qué está acá</th><th style={th}>Asist.</th><th style={th} title="Puesto en la fila de confirmados: solo cuentan los que dijeron que van">Confirmó · nº</th><th style={th}></th>
                           </tr></thead>
                           <tbody>{banca.map((j) => filaJ(j, false))}</tbody>
                         </table>
