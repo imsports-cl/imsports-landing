@@ -21,7 +21,7 @@ interface LineupPlayer {
   user_id: string; nombre: string; pj: number; orden: number; pos: number;
   titular: boolean; asegurado: boolean; es_mvp: boolean; es_organizador: boolean;
   sancionado: boolean; sancion_motivo: string | null; neteado: boolean;
-  confirmo_tarde: boolean;
+  confirmo_tarde: boolean; cupo_caducado: boolean;
   asegura_hasta: string | null; confirmo_at: string | null;
 }
 interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean; neteado: boolean }
@@ -276,6 +276,7 @@ export default function AdminPage() {
                 : j.es_mvp ? '🌟 MVP fecha pasada'
                 : j.es_organizador ? '🎩 Organizador'
                 : j.asegurado ? `🪑 Banca · asegura hasta ${fechaCorta(j.asegura_hasta)}`
+                : j.cupo_caducado ? `⌛ Cupo caducado · respondió ${j.orden}º, fuera de los ${L.match.cupos} primeros → entra por puntaje`
                 : 'Puntaje';
               // sancionado puro = pierde los puntos; neteado sí los conserva
               const sinPuntos = (j2: LineupPlayer) => j2.sancionado && !j2.neteado;
@@ -283,8 +284,8 @@ export default function AdminPage() {
                 <tr key={j.user_id} style={sinPuntos(j) ? { background: 'rgba(255,107,107,0.07)' } : j.neteado ? { background: 'rgba(246,196,83,0.06)' } : undefined}>
                   <td style={{ ...td, color: S.dim, width: 34 }}>{j.pos}</td>
                   <td style={{ ...td, fontWeight: 700 }}>{j.nombre}</td>
-                  <td style={{ ...td, fontSize: 13, color: sinPuntos(j) ? '#FF8A8A' : j.neteado || j.confirmo_tarde ? '#F6C453' : j.asegurado ? S.accent : S.dim }}>
-                    {destacar || j.sancionado || j.confirmo_tarde ? comoEntra(j) : '—'}
+                  <td style={{ ...td, fontSize: 13, color: sinPuntos(j) ? '#FF8A8A' : j.neteado || j.confirmo_tarde || j.cupo_caducado ? '#F6C453' : j.asegurado ? S.accent : S.dim }}>
+                    {destacar || j.sancionado || j.confirmo_tarde || j.cupo_caducado ? comoEntra(j) : '—'}
                   </td>
                   <td style={{ ...td, fontWeight: 800, color: sinPuntos(j) ? S.dim : destacar ? S.text : S.dim, textDecoration: sinPuntos(j) ? 'line-through' : undefined }}>{j.pj}</td>
                   <td style={{ ...td, color: S.dim, fontSize: 13 }}>{j.orden}º · {horaCorta(j.confirmo_at)}</td>
@@ -328,7 +329,8 @@ export default function AdminPage() {
                       <b style={{ color: '#F6C453' }}>⚠️ Aseguran cupo pero no han confirmado</b>
                       <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>
                         {L.asegurados_sin_confirmar.map((a) => `${a.nombre} (hasta ${fechaCorta(a.asegura_hasta)})`).join(' · ')}
-                        {' '}— si confirman entran directo y salen los últimos por puntaje.
+                        {' '}— van {L.jugadores.length} confirmados: solo conservan el cupo si responden dentro
+                        de los {L.match.cupos} primeros. Después de eso entran por puntaje como cualquiera.
                       </p>
                     </section>
                   )}
@@ -510,6 +512,19 @@ export default function AdminPage() {
                         <li><b>📊 El resto por asistencias</b> de las últimas 12 pichangas, de mayor a menor.</li>
                         <li><b>⏱️ Empate</b> en asistencias → clasifica <b>el que confirmó primero</b>.</li>
                       </ol>
+
+                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#F6C453' }}>⌛ El cupo asegurado caduca</p>
+                      <ul style={{ paddingLeft: 20, margin: '0 0 18px', color: S.dim }}>
+                        <li>
+                          Los tres cupos de arriba (MVP, organizador y banca) <b style={{ color: S.text }}>solo valen si confirmó
+                          dentro de los {L.match.cupos} primeros</b> en responder que va.
+                        </li>
+                        <li>
+                          Si responde después, <b style={{ color: S.text }}>pierde el privilegio</b> y compite por asistencias
+                          como cualquiera. No es castigo: simplemente deja de tener prioridad.
+                        </li>
+                        <li>El cupo no se “gasta”: sigue vigente hasta su fecha de vencimiento para las pichangas siguientes.</li>
+                      </ul>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>⛔ Pierde cupo (dura una fecha)</p>
                       <ul style={{ paddingLeft: 20, margin: '0 0 18px', color: S.dim }}>
