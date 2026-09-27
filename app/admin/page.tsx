@@ -288,7 +288,16 @@ export default function AdminPage() {
                     {destacar || j.sancionado || j.confirmo_tarde || j.cupo_caducado ? comoEntra(j) : '—'}
                   </td>
                   <td style={{ ...td, fontWeight: 800, color: sinPuntos(j) ? S.dim : destacar ? S.text : S.dim, textDecoration: sinPuntos(j) ? 'line-through' : undefined }}>{j.pj}</td>
-                  <td style={{ ...td, color: S.dim, fontSize: 13 }}>{j.orden}º · {horaCorta(j.confirmo_at)}</td>
+                  <td style={{ ...td, fontSize: 13 }}>
+                    {/* dentro del corte = conserva el cupo asegurado si lo tiene */}
+                    <b style={{ color: j.orden <= L.match.cupos ? S.accent : '#F6C453', fontSize: 14 }}>
+                      {j.orden}º
+                    </b>
+                    <span style={{ color: S.dim }}>
+                      {' '}· {horaCorta(j.confirmo_at)}
+                      {j.orden > L.match.cupos && ` · fuera de los ${L.match.cupos}`}
+                    </span>
+                  </td>
                   <td style={{ ...td, textAlign: 'right' }}>
                     <button onClick={() => bajarJugador(j.user_id, j.nombre)} disabled={busy}
                       title="El jugador avisó que no va"
@@ -340,7 +349,7 @@ export default function AdminPage() {
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead><tr>
-                          <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Cómo entra</th><th style={th}>Asist.</th><th style={th}>Confirmó</th><th style={th}></th>
+                          <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Cómo entra</th><th style={th}>Asist.</th><th style={th} title="Puesto en la fila de confirmados: solo cuentan los que dijeron que van">Confirmó · nº</th><th style={th}></th>
                         </tr></thead>
                         <tbody>{titulares.map((j) => filaJ(j, true))}</tbody>
                       </table>
@@ -353,7 +362,7 @@ export default function AdminPage() {
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead><tr>
-                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}></th><th style={th}>Asist.</th><th style={th}>Confirmó</th><th style={th}></th>
+                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}></th><th style={th}>Asist.</th><th style={th} title="Puesto en la fila de confirmados: solo cuentan los que dijeron que van">Confirmó · nº</th><th style={th}></th>
                           </tr></thead>
                           <tbody>{banca.map((j) => filaJ(j, false))}</tbody>
                         </table>
@@ -524,6 +533,16 @@ export default function AdminPage() {
                           como cualquiera. No es castigo: simplemente deja de tener prioridad.
                         </li>
                         <li>El cupo no se “gasta”: sigue vigente hasta su fecha de vencimiento para las pichangas siguientes.</li>
+                      </ul>
+
+                      <p style={{ margin: '0 0 6px', fontWeight: 700 }}>🔢 El número de confirmación</p>
+                      <ul style={{ paddingLeft: 20, margin: '0 0 18px', color: S.dim }}>
+                        <li>Es el puesto en la fila de <b style={{ color: S.text }}>los que dijeron que van</b>. Decir que no, no ocupa lugar.</li>
+                        <li>
+                          Si alguien dice que no y <b style={{ color: S.text }}>después se arrepiente</b>, entra al final de la fila
+                          con la hora del cambio: no recupera el puesto que tenía.
+                        </li>
+                        <li>Lo mismo si lo bajas y después lo reincorporas desde este panel.</li>
                       </ul>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>⛔ Pierde cupo (dura una fecha)</p>
