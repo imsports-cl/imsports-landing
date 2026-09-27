@@ -396,6 +396,7 @@ export default function AdminPage() {
                     <p style={{ color: S.dim, fontSize: 12, marginBottom: 0, marginTop: 12 }}>
                       Los que queden en banca aseguran cupo las próximas 4 fechas (se agregan solos al cerrar el partido),
                       salvo quien haya confirmado <b>después</b> de anunciados los titulares: juega si hay cupo, pero no asegura.
+                      A quien ya traía cupo vigente <b>no se le corre la fecha</b>: mantiene la que tenía.
                       Si alguien avisó que no va, usa <b>“Se bajó”</b> — así no queda como banca ni asegura cupo.
                     </p>
                   </section>
@@ -542,7 +543,12 @@ export default function AdminPage() {
                       <ol style={{ paddingLeft: 20, margin: '0 0 18px' }}>
                         <li><b style={{ color: S.accent }}>🌟 MVP de la fecha pasada</b> — solo para la fecha siguiente.</li>
                         <li><b style={{ color: S.accent }}>🎩 Organizador</b> — quien creó el partido, solo esa fecha.</li>
-                        <li><b style={{ color: S.accent }}>🪑 Los que quedaron en banca</b> — aseguran las <b>4 fechas siguientes</b>, y el cupo se mantiene aunque alcancen a jugar antes.</li>
+                        <li>
+                          <b style={{ color: S.accent }}>🪑 Los que quedaron en banca</b> — aseguran las <b>4 fechas siguientes</b>,
+                          y el cupo se mantiene aunque alcancen a jugar antes. Volver a quedar en banca
+                          con el cupo <b style={{ color: S.text }}>todavía vigente no corre la fecha</b>: se conserva la
+                          original. Solo arranca un nuevo período si queda en banca cuando el anterior ya venció.
+                        </li>
                         <li><b>📊 El resto por asistencias</b> de las últimas 12 pichangas, de mayor a menor.</li>
                         <li><b>⏱️ Empate</b> en asistencias → clasifica <b>el que confirmó primero</b>.</li>
                       </ol>
