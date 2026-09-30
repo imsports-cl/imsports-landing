@@ -193,9 +193,11 @@ export async function GET(
   function renderOpen() {
     const label = PHASE_LABELS[phase] || 'Próximo partido';
     const emoji = PHASE_EMOJI[phase] || '⚽';
-    const dateLine = match!.date
-      ? `${match!.date}${match!.time ? ` · ${match!.time}` : ''}`
-      : '';
+    // dateLabel ya viene formateado ("lun, 28 sept"). Antes se usaba
+    // match.date crudo y salía "2026-09-28T00:00:00+00:00 · 20:00".
+    const dateLine = dateLabel
+      ? `${dateLabel}${match!.time ? ` · ${match!.time}` : ''}`
+      : (match!.time || '');
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
