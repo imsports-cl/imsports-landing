@@ -12,8 +12,18 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 // Server-only client. NUNCA importar desde Client Components.
+//
+// cache: 'no-store' es obligatorio. Next.js 14 cachea los fetch() por defecto
+// (Data Cache) y supabase-js usa fetch por dentro, así que las consultas
+// quedaban congeladas: el OG de un partido cerrado seguía mostrando los datos
+// de cuando estaba en convocatoria, y el marcador en 0-0. El force-dynamic de
+// la ruta no alcanza: evita cachear la RESPUESTA, no las consultas internas.
 export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
+  global: {
+    fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+      fetch(input, { ...init, cache: 'no-store' }),
+  },
 });
 
 export interface MatchOG {
