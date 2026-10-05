@@ -128,7 +128,7 @@ export default function PrivacyPage() {
 
         <Section title="10. Contacto">
           <p>
-            ¿Dudas sobre privacidad? Escribinos a{' '}
+            ¿Dudas sobre privacidad? Escríbenos a{' '}
             <a href={`mailto:${SUPPORT_EMAIL}`} style={styles.link}>{SUPPORT_EMAIL}</a>.
           </p>
           <p>
