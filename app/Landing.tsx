@@ -185,7 +185,7 @@ export default function Landing() {
         <div className="section-header reveal">
           <div className="tag">Features</div>
           <h2>Todo lo que tu grupo necesita</h2>
-          <p>Dejá el Excel y el grupo de WhatsApp. IMSPORTS centraliza todo.</p>
+          <p>Deja el Excel y el grupo de WhatsApp. IMSPORTS centraliza todo.</p>
         </div>
         <div className="features-grid">
           <div className="feature-card reveal">

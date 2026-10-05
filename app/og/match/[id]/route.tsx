@@ -184,7 +184,7 @@ export async function GET(
           border: `2px solid ${COLORS.orange}`,
           borderRadius: 999,
         }}>
-          Abrí la app para votar
+          Abre la app para votar
         </div>
       </div>
     );

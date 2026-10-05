@@ -98,7 +98,7 @@ export default function PrivacyPage() {
             <li><strong>Revocar consentimiento</strong> para notificaciones en cualquier momento.</li>
           </ul>
           <p>
-            Para ejercer estos derechos, escribinos a <a href={`mailto:${SUPPORT_EMAIL}`} style={styles.link}>{SUPPORT_EMAIL}</a>.
+            Para ejercer estos derechos, escríbenos a <a href={`mailto:${SUPPORT_EMAIL}`} style={styles.link}>{SUPPORT_EMAIL}</a>.
           </p>
         </Section>
 
@@ -114,8 +114,8 @@ export default function PrivacyPage() {
         <Section title="8. Menores de edad">
           <p>
             IM SPORTS está dirigida a personas de 13 años o más. No recopilamos conscientemente información
-            de menores de 13 años. Si descubrís que un menor ha creado una cuenta sin consentimiento parental,
-            escribinos para eliminarla.
+            de menores de 13 años. Si descubres que un menor ha creado una cuenta sin consentimiento parental,
+            escríbenos para eliminarla.
           </p>
         </Section>
 

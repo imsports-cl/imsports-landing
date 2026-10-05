@@ -24,7 +24,7 @@ export default function TermsPage() {
 
         <Section title="1. Aceptación">
           <p>
-            Al crear una cuenta o usar IM SPORTS aceptás estos términos. Si no estás de acuerdo, no uses la app.
+            Al crear una cuenta o usar IM SPORTS aceptas estos términos. Si no estás de acuerdo, no uses la app.
           </p>
         </Section>
 
@@ -37,16 +37,16 @@ export default function TermsPage() {
 
         <Section title="3. Cuenta de usuario">
           <ul style={styles.ul}>
-            <li>Debés tener al menos 13 años para crear una cuenta.</li>
+            <li>Debes tener al menos 13 años para crear una cuenta.</li>
             <li>Tu cuenta es personal e intransferible. No la compartas.</li>
-            <li>Sos responsable de la actividad en tu cuenta.</li>
-            <li>Avisanos inmediatamente si sospechás un uso no autorizado.</li>
+            <li>Eres responsable de la actividad en tu cuenta.</li>
+            <li>Avisanos inmediatamente si sospechas un uso no autorizado.</li>
           </ul>
         </Section>
 
         <Section title="4. Contenido del usuario">
           <p>
-            Sos dueño del contenido que subís (fotos, comentarios, mensajes). Al subirlo nos otorgás una
+            Eres dueño del contenido que subes (fotos, comentarios, mensajes). Al subirlo nos otorgas una
             licencia limitada para mostrarlo dentro de la app a otros miembros de tu grupo.
           </p>
           <p>
@@ -58,10 +58,10 @@ export default function TermsPage() {
 
         <Section title="5. Conducta">
           <ul style={styles.ul}>
-            <li>Tratá a otros usuarios con respeto.</li>
+            <li>Trata a otros usuarios con respeto.</li>
             <li>No hagas spam ni intentes acceder a datos de otros usuarios sin autorización.</li>
-            <li>No usés bots para manipular estadísticas o votos.</li>
-            <li>No intentés vulnerar la seguridad del servicio.</li>
+            <li>No uses bots para manipular estadísticas o votos.</li>
+            <li>No intentes vulnerar la seguridad del servicio.</li>
           </ul>
         </Section>
 
@@ -75,17 +75,17 @@ export default function TermsPage() {
         <Section title="7. Modificaciones del servicio">
           <p>
             Podemos modificar, suspender o discontinuar features en cualquier momento. Si una modificación
-            afecta sustancialmente cómo usás la app, te avisaremos con razonable antelación.
+            afecta sustancialmente cómo usas la app, te avisaremos con razonable antelación.
           </p>
         </Section>
 
         <Section title="8. Terminación">
           <p>
-            Podés eliminar tu cuenta en cualquier momento escribiendo a{' '}
+            Puedes eliminar tu cuenta en cualquier momento escribiendo a{' '}
             <a href={`mailto:${SUPPORT_EMAIL}`} style={styles.link}>{SUPPORT_EMAIL}</a>.
           </p>
           <p>
-            Podemos suspender o terminar tu cuenta si violás reiteradamente estos términos. Te
+            Podemos suspender o terminar tu cuenta si violas reiteradamente estos términos. Te
             notificaremos por email antes de terminar la cuenta, salvo violaciones graves.
           </p>
         </Section>
