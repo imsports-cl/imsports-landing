@@ -358,7 +358,7 @@ export default function Landing() {
         <div className="footer-inner">
           <div className="footer-text">2026 IMSPORTS. Hecho en Chile.</div>
           <div className="footer-links">
-            <a href="#">Instagram</a>
+            <a href="https://www.instagram.com/imsports.app/" target="_blank" rel="noopener noreferrer">Instagram</a>
             <a href="#">TikTok</a>
             <a href="mailto:hola@imsports.cl">Contacto</a>
           </div>
