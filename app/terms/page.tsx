@@ -40,7 +40,7 @@ export default function TermsPage() {
             <li>Debes tener al menos 13 años para crear una cuenta.</li>
             <li>Tu cuenta es personal e intransferible. No la compartas.</li>
             <li>Eres responsable de la actividad en tu cuenta.</li>
-            <li>Avisanos inmediatamente si sospechas un uso no autorizado.</li>
+            <li>Avísanos inmediatamente si sospechas un uso no autorizado.</li>
           </ul>
         </Section>
 
