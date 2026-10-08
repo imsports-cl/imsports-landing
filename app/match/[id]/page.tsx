@@ -21,11 +21,12 @@ interface Props {
 }
 
 function formatDateLabel(date: string | null, time: string | null, location: string | null): string {
-  if (!date) return '';
-  const parts: string[] = [date];
-  if (time) parts.push(`a las ${time}`);
-  if (location) parts.push(`en ${location}`);
-  return parts.join(' ');
+  const parts: string[] = [];
+  const short = formatShortDate(date);
+  if (short) parts.push(short);
+  if (time) parts.push(time);
+  if (location) parts.push(location);
+  return parts.join(' · ');
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -145,7 +146,7 @@ export default async function MatchPage({ params }: Props) {
         📲 Abriendo {groupName}...
       </h1>
       <p style={{ color: '#aaa', marginBottom: 28, maxWidth: 480 }}>
-        Si tenés IM SPORTS instalada, este link debería abrirla automáticamente. Si no, descargala:
+        Si tienes IM SPORTS instalada, este link debería abrirla automáticamente. Si no, descárgala:
       </p>
       <a
         href="https://apps.apple.com/app/id6761868170"
