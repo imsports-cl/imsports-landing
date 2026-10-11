@@ -354,7 +354,7 @@ export default function AdminPage() {
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead><tr>
-                          <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Cómo entra</th><th style={th}>Asist.</th><th style={th} title="Puesto en la fila de confirmados: solo cuentan los que dijeron que van">Confirmó · nº</th><th style={th}></th>
+                          <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Cómo entra</th><th style={th} title="Confirmaciones de las últimas 12 pichangas. Cada confirmación suma 1 punto.">Conf.</th><th style={th} title="Puesto en la fila de confirmados: solo cuentan los que dijeron que van">Confirmó · nº</th><th style={th}></th>
                         </tr></thead>
                         <tbody>{titulares.map((j) => filaJ(j, true))}</tbody>
                       </table>
@@ -381,7 +381,7 @@ export default function AdminPage() {
                             <li key={j.user_id}>
                               <b style={{ color: S.text }}>{j.nombre}</b> — confirmó{' '}
                               <b style={{ color: '#F6C453' }}>{j.orden}º</b> ({horaCorta(j.confirmo_at)}),
-                              {' '}{j.pj} asist. · el cupo le sigue vigente hasta {fechaCorta(j.asegura_hasta)}
+                              {' '}{j.pj} conf. · el cupo le sigue vigente hasta {fechaCorta(j.asegura_hasta)}
                             </li>
                           ))}
                         </ul>
@@ -392,7 +392,7 @@ export default function AdminPage() {
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead><tr>
-                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Por qué está acá</th><th style={th}>Asist.</th><th style={th} title="Puesto en la fila de confirmados: solo cuentan los que dijeron que van">Confirmó · nº</th><th style={th}></th>
+                            <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>Por qué está acá</th><th style={th} title="Confirmaciones de las últimas 12 pichangas. Cada confirmación suma 1 punto.">Conf.</th><th style={th} title="Puesto en la fila de confirmados: solo cuentan los que dijeron que van">Confirmó · nº</th><th style={th}></th>
                           </tr></thead>
                           <tbody>{banca.map((j) => filaJ(j, false))}</tbody>
                         </table>
@@ -554,8 +554,8 @@ export default function AdminPage() {
                           con el cupo <b style={{ color: S.text }}>todavía vigente no corre la fecha</b>: se conserva la
                           original. Solo arranca un nuevo período si queda en banca cuando el anterior ya venció.
                         </li>
-                        <li><b>📊 El resto por asistencias</b> de las últimas 12 pichangas, de mayor a menor.</li>
-                        <li><b>⏱️ Empate</b> en asistencias → clasifica <b>el que confirmó primero</b>.</li>
+                        <li><b>📊 El resto por confirmaciones</b> de las últimas 12 pichangas, de mayor a menor.</li>
+                        <li><b>⏱️ Empate</b> en confirmaciones → clasifica <b>el que confirmó primero</b>.</li>
                       </ol>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#F6C453' }}>⌛ El cupo asegurado caduca</p>
@@ -565,7 +565,7 @@ export default function AdminPage() {
                           dentro de los {L.match.cupos} primeros</b> en responder que va.
                         </li>
                         <li>
-                          Si responde después, <b style={{ color: S.text }}>pierde el privilegio</b> y compite por asistencias
+                          Si responde después, <b style={{ color: S.text }}>pierde el privilegio</b> y compite por confirmaciones
                           como cualquiera. No es castigo: simplemente deja de tener prioridad.
                         </li>
                         <li>El cupo no se “gasta”: sigue vigente hasta su fecha de vencimiento para las pichangas siguientes.</li>
@@ -591,7 +591,7 @@ export default function AdminPage() {
                       <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#F6C453' }}>⚖️ Neteo</p>
                       <p style={{ margin: '0 0 18px', color: S.dim }}>
                         Si alguien <b style={{ color: S.text }}>asegura cupo y lo pierde</b> en la misma fecha, se anulan:
-                        entra por la regla de puntajes, conservando sus asistencias.
+                        entra por la regla de puntajes, conservando sus confirmaciones.
                       </p>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700 }}>🚪 Bajarse</p>
