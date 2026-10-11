@@ -16,6 +16,8 @@ const supa = createClient(
 );
 
 interface RankRow { nombre: string; is_ghost: boolean; pj: number; v: number; e: number; d: number; goles: number; mvp: number; }
+/** Últimas 12 por confirmación. `ranking` (asistencia) sigue en el JSON y no se muestra acá. */
+interface ConfRow { nombre: string; is_ghost: boolean; confirmadas: number; jugo: number; banca: number; }
 interface RegRow { nombre: string; email: string; registrado: string; ultimo_acceso: string | null; partidos: number; }
 interface LineupPlayer {
   user_id: string; nombre: string; pj: number; orden: number; pos: number;
@@ -42,7 +44,10 @@ const MOTIVOS: Record<string, string> = {
   bajo_tarde: '🚪 Se bajó pasadas las 13:00',
 };
 interface Miembro { user_id: string; nombre: string }
-interface PanelData { fechas: string[]; ranking: RankRow[]; registrados: RegRow[]; lineup: Lineup; miembros: Miembro[]; }
+interface PanelData {
+  fechas: string[]; ranking: RankRow[]; ultimas12_confirmacion?: ConfRow[];
+  registrados: RegRow[]; lineup: Lineup; miembros: Miembro[];
+}
 
 /** Fecha corta legible: 2026-09-28 → "28 sep" */
 const fechaCorta = (iso: string | null) => {
@@ -255,7 +260,7 @@ export default function AdminPage() {
                   {t === 'titulares'
                     ? `🎯 Titulares`
                     : t === 'ranking'
-                    ? `⚽ Últimas 12 pichangas`
+                    ? `⚽ Últimas 12 por confirmación`
                     : t === 'registrados'
                     ? `👥 Registrados (${data.registrados.length})`
                     : t === 'novedades'
@@ -609,26 +614,41 @@ export default function AdminPage() {
             {tab === 'ranking' && (
               <section style={box}>
                 <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
-                  Fechas: {data.fechas[data.fechas.length - 1]} → {data.fechas[0]} · ordenado por asistencia (criterio de cupos)
+                  Fechas: {data.fechas[data.fechas.length - 1]} → {data.fechas[0]} · ordenado por confirmaciones
                 </p>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead><tr>
-                      <th style={th}>#</th><th style={th}>Jugador</th><th style={th}>PJ</th><th style={th}>V</th><th style={th}>E</th><th style={th}>D</th><th style={th}>Goles</th><th style={th}>MVP</th>
-                    </tr></thead>
-                    <tbody>
-                      {data.ranking.map((r, i) => (
-                        <tr key={r.nombre + i}>
-                          <td style={{ ...td, color: S.dim }}>{i + 1}</td>
-                          <td style={{ ...td, fontWeight: 600 }}>{r.nombre}{r.is_ghost ? ' 🍪' : ''}</td>
-                          <td style={{ ...td, color: S.accent, fontWeight: 800 }}>{r.pj}</td>
-                          <td style={td}>{r.v}</td><td style={td}>{r.e}</td><td style={td}>{r.d}</td>
-                          <td style={td}>{r.goles}</td><td style={td}>{r.mvp}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
+                  Cada confirmación de que va suma 1, una sola por pichanga. Jugó y banca salen de si quedó titular o en la banca. Si esa fecha no tuvo convocatoria en la app, no suma a nadie.
+                </p>
+                {data.ultimas12_confirmacion == null ? (
+                  <p style={{ color: S.dim, fontSize: 14 }}>
+                    Todavía no están las cifras. Aparecen cuando se aplique en la base la función de confirmaciones.
+                  </p>
+                ) : data.ultimas12_confirmacion.length === 0 ? (
+                  <p style={{ color: S.dim, fontSize: 14 }}>Nadie confirmó en estas 12 pichangas.</p>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead><tr>
+                        <th style={th}>#</th>
+                        <th style={th}>Jugador</th>
+                        <th style={th} title="Veces que confirmó que iba. Una sola por pichanga.">Confirmadas</th>
+                        <th style={th} title="Confirmó y quedó titular">Jugó</th>
+                        <th style={th} title="Confirmó y quedó en la banca">Banca</th>
+                      </tr></thead>
+                      <tbody>
+                        {data.ultimas12_confirmacion.map((r, i) => (
+                          <tr key={r.nombre + i}>
+                            <td style={{ ...td, color: S.dim }}>{i + 1}</td>
+                            <td style={{ ...td, fontWeight: 600 }}>{r.nombre}{r.is_ghost ? ' 🍪' : ''}</td>
+                            <td style={{ ...td, color: S.accent, fontWeight: 800 }}>{r.confirmadas}</td>
+                            <td style={td}>{r.jugo}</td>
+                            <td style={td}>{r.banca}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
             )}
 

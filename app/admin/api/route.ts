@@ -5,6 +5,8 @@
  * con service role (revocadas para anon/authenticated).
  *
  * GET           → { ...admin_panel_data(), lineup: admin_lineup() }
+ *   El RPC conserva fechas, ranking y registrados, y suma ultimas12_confirmacion
+ *   (solo match_confirmations status = confirmed). La pestaña Últimas 12 lee esa clave.
  * POST {accion} → gestiona cupos asegurados (guaranteed_spots)
  */
 import { NextRequest, NextResponse } from 'next/server';
