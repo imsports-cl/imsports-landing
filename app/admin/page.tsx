@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import Novedades from './Novedades';
+import Pagos from './Pagos';
 import { createClient, type Session } from '@supabase/supabase-js';
 
 const supa = createClient(
@@ -90,7 +91,7 @@ export default function AdminPage() {
   const [loginErr, setLoginErr] = useState('');
   const [data, setData] = useState<PanelData | null>(null);
   const [denied, setDenied] = useState(false);
-  const [tab, setTab] = useState<'titulares' | 'ranking' | 'registrados' | 'moderacion' | 'novedades'>('titulares');
+  const [tab, setTab] = useState<'titulares' | 'pagos' | 'ranking' | 'registrados' | 'moderacion' | 'novedades'>('titulares');
   const [mod, setMod] = useState<ModData | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [cupos, setCupos] = useState(12);
@@ -254,11 +255,13 @@ export default function AdminPage() {
         ) : (
           <>
             <nav style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
-              {(['titulares', 'ranking', 'registrados', 'moderacion', 'novedades'] as const).map((t) => (
+              {(['titulares', 'pagos', 'ranking', 'registrados', 'moderacion', 'novedades'] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   style={{ padding: '8px 16px', borderRadius: 100, border: `1px solid ${tab === t ? S.accent : S.border}`, background: tab === t ? 'rgba(0,230,118,0.12)' : 'transparent', color: tab === t ? S.accent : S.dim, fontWeight: 700, cursor: 'pointer' }}>
                   {t === 'titulares'
                     ? `🎯 Titulares`
+                    : t === 'pagos'
+                    ? `💳 Pagos`
                     : t === 'ranking'
                     ? `⚽ Últimas 12 por confirmación`
                     : t === 'registrados'
@@ -676,6 +679,8 @@ export default function AdminPage() {
             )}
 
             {tab === 'novedades' && session && <Novedades token={session.access_token} />}
+
+            {tab === 'pagos' && session && <Pagos token={session.access_token} />}
 
             {tab === 'moderacion' && (
               <section style={box}>
