@@ -6,7 +6,7 @@
  * Estados: ✅ pagó (a tiempo) · 🕓 pagó tarde (después del cierre: NO levanta
  * la sanción) · ❌ no pagó. Esta pestaña nunca quita ni perdona sanciones.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { horaClt } from '../../lib/mp/tiempo';
 
 const S = {
@@ -60,7 +60,10 @@ export default function Pagos({ token }: { token: string }) {
   const [revisando, setRevisando] = useState(false);
 
   // Si falla, deja los datos anteriores en pantalla y solo muestra el error.
+  // Contador de requests: solo la respuesta más reciente puede actualizar el estado.
+  const reqId = useRef(0);
   const cargar = async (id = matchId) => {
+    const mio = ++reqId.current;
     setErr(null);
     try {
       const r = await fetch(`/admin/api/pagos${id ? `?match_id=${encodeURIComponent(id)}` : ''}`, {
@@ -68,10 +71,12 @@ export default function Pagos({ token }: { token: string }) {
         cache: 'no-store',
       });
       const j = await r.json().catch(() => ({}));
+      if (mio !== reqId.current) return;
       if (!r.ok) { setErr(j.error || `No se pudieron cargar los pagos (${r.status})`); return; }
       setD(j);
       if (!id) setMatchId(j.partido.id);
     } catch {
+      if (mio !== reqId.current) return;
       setErr('No se pudo conectar con el servidor. Revisa tu conexión e intenta de nuevo.');
     }
   };
@@ -117,7 +122,7 @@ export default function Pagos({ token }: { token: string }) {
   const sel: React.CSSProperties = { background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: '6px 10px' };
   const btn = (color: string): React.CSSProperties => ({ background: 'none', border: `1px solid ${color}`, color, borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 });
 
-  if (err && !d) return <section style={box}><p style={{ color: S.red, margin: 0 }}>{err}</p></section>;
+  if (err && !d) return <section style={box}><p role="alert" style={{ color: S.red, margin: 0 }}>{err}</p></section>;
   if (!d) return <p style={{ color: S.dim, textAlign: 'center', marginTop: 40 }}>Cargando pagos…</p>;
 
   return (
@@ -136,7 +141,7 @@ export default function Pagos({ token }: { token: string }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-            <button onClick={revisar} disabled={revisando || busy !== null}
+            <button onClick={revisar} disabled={revisando || busy !== null} aria-busy={revisando}
               style={{ ...btn(S.accent), padding: '6px 12px', fontSize: 13, opacity: revisando ? 0.6 : 1, cursor: revisando ? 'wait' : 'pointer' }}
               title="Consulta MercadoPago ahora y actualiza pagó / pagó tarde / no pagó">
               {revisando ? 'Revisando…' : '🔄 Revisar pagos'}
@@ -145,7 +150,7 @@ export default function Pagos({ token }: { token: string }) {
           </div>
           <label style={{ color: S.dim, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
             Pichanga
-            <select value={matchId} onChange={(e) => { setMatchId(e.target.value); setD(null); cargar(e.target.value); }} style={sel}>
+            <select value={matchId} onChange={(e) => { setMatchId(e.target.value); setD(null); cargar(e.target.value); }} disabled={revisando} style={sel}>
               {d.partidos.map((p) => (
                 <option key={p.id} value={p.id}>{fechaCorta(p.fecha)}{p.hora ? ` ${p.hora.slice(0, 5)}` : ''}{p.cancelado ? ' (cancelada)' : ''}</option>
               ))}
@@ -175,7 +180,7 @@ export default function Pagos({ token }: { token: string }) {
             {d.resumen.sin_asignar > 0 && <> · <b style={{ color: S.warn }}>{d.resumen.sin_asignar}</b> pago(s) sin asignar</>}
           </p>
         )}
-        {err && <p style={{ color: S.red, fontSize: 13, margin: '8px 0 0' }}>{err}</p>}
+        {err && <p role="alert" style={{ color: S.red, fontSize: 13, margin: '8px 0 0' }}>{err}</p>}
       </section>
 
       <section style={box}>
