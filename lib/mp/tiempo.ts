@@ -49,3 +49,17 @@ export function ventanaPagos(matchDate: string, matchTime: string | null, ahora:
   const hasta = fin.getTime() > ahora.getTime() ? ahora : fin;
   return { desde, hasta, cerrada: fin.getTime() <= ahora.getTime() };
 }
+
+/**
+ * Hora de Chile "HH:MM" (24 h) de un instante ISO. Para «Última revisión: 13:45».
+ * Pura y sin dependencias de servidor: la usa también el panel (cliente).
+ */
+export function horaClt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const p = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, hourCycle: 'h23', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(d);
+  const g = (t: string) => p.find((x) => x.type === t)?.value ?? '00';
+  return `${g('hour')}:${g('minute')}`;
+}

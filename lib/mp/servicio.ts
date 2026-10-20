@@ -107,6 +107,8 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
  * y una sanción existente se muestra tal cual (nunca se perdona sola).
  */
 export async function estadoPagos(deps: Deps, groupId: string, matchId?: string | null) {
+  /** Hora del servidor al consultar (el panel la muestra como «Última revisión») */
+  const revisado_at = deps.ahora().toISOString();
   const { m, recientes } = await elegirPartido(deps, groupId, matchId);
   const tit = await titularesQuePagan(deps, m);
   const { v, cierre, cruce: c } = await cruce(deps, m, tit);
@@ -121,6 +123,7 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
 
   return {
     configurado: Boolean(deps.mp),
+    revisado_at,
     partidos: recientes.map((p) => ({ id: p.id, fecha: ymd(p.date), hora: p.time, cancelado: p.status === 'cancelled' })),
     partido: {
       id: m.id, fecha: ymd(m.date), hora: m.time, precio: m.price != null ? Number(m.price) : null,
