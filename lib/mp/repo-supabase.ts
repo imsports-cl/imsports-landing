@@ -66,6 +66,15 @@ export const repoSupabase: PagosRepo = {
     err(error);
     return (data?.[0] as any)?.date ?? null;
   },
+  async eventoCierre(m) {
+    // Mensaje system que inserta la app al cerrar el partido (create_match_system_message, kind match_closed).
+    const { data, error } = await db.from('group_messages').select('created_at')
+      .eq('group_id', m.group_id).eq('type', 'system')
+      .eq('metadata->>kind', 'match_closed').eq('metadata->>match_id', m.id)
+      .order('created_at', { ascending: true }).limit(1);
+    err(error);
+    return (data?.[0] as any)?.created_at ?? null;
+  },
   async sanciones(groupId, appliesTo) {
     const { data, error } = await db.from('player_sanctions')
       .select('user_id, applies_to, reason, note').eq('group_id', groupId).eq('applies_to', appliesTo);

@@ -66,3 +66,13 @@ export const PAGOS_RAW: PagoMpRaw[] = [
 
 export const PAGARON = ['u-spid', 'u-esteban', 'u-scott', 'u-alan', 'u-thomas', 'u-chipi', 'u-gonga'];
 export const NO_PAGARON = ['u-gsoto', 'u-chino', 'u-gonzalo', 'u-robert'];
+
+/**
+ * Cierre de pago real del 19-oct: primer mensaje system match_closed del partido
+ * (group_messages.created_at = 2026-10-20 10:43:40 CLT).
+ */
+export const CIERRE_19OCT = '2026-10-20T13:43:40.127Z';
+
+/** Robert pagó el 20-oct 10:44 CLT (MP lo devuelve en -04:00): después del cierre → «pagó tarde». */
+export const PAGO_ROBERT_TARDE: PagoMpRaw = pichanga(1010, '2026-10-20T09:44:10.000-04:00',
+  { id: '9008', email: 'rm.pagos@example.test', first_name: 'ROBERTO', last_name: 'MELLA' });

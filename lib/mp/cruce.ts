@@ -11,6 +11,7 @@
  */
 import { localEmailLetras, normalizarEmail, normalizarNombre, tokensEmail, tokensNombre } from './normalizar';
 import type { PagoMp } from './pagos-mp';
+import { esPagoTarde, fechaHoraClt } from './cierre';
 
 export interface Titular {
   user_id: string;
@@ -33,12 +34,25 @@ export interface AliasPagador {
 export type Via = 'alias' | 'email' | 'nombre';
 export type MotivoSinAsignar = 'sin_coincidencia' | 'ambiguo' | 'duplicado' | 'no_titular';
 
-export interface PagoVisible { id: string; fecha: string; monto: number; pagador: string }
+export interface PagoVisible {
+  id: string; fecha: string; monto: number; pagador: string;
+  /** Fecha/hora de aprobación en hora de Chile, ya formateada ("mar 20-oct 10:44") */
+  fecha_clt: string;
+  /** Llegó después del cierre de pago (ver lib/mp/cierre.ts) */
+  tarde: boolean;
+}
+
+/**
+ * pagado       = pagó a tiempo (antes o justo en el cierre)
+ * pagado_tarde = pagó DESPUÉS del cierre: NO levanta la sanción
+ * no_pagado    = sin pago
+ */
+export type EstadoPago = 'pagado' | 'pagado_tarde' | 'no_pagado';
 
 export interface FilaTitular {
   user_id: string;
   nombre: string;
-  estado: 'pagado' | 'no_pagado';
+  estado: EstadoPago;
   pago: (PagoVisible & { via: Via }) | null;
 }
 
@@ -51,7 +65,10 @@ export interface PagoSinAsignar extends PagoVisible {
 export interface ResultadoCruce {
   titulares: FilaTitular[];
   sin_asignar: PagoSinAsignar[];
-  resumen: { titulares: number; pagados: number; no_pagados: number; sin_asignar: number; recaudado: number };
+    /** pagados = a tiempo; pagados_tarde aparte (siguen sancionables); no_pagados = sin pago */
+  resumen: { titulares: number; pagados: number; pagados_tarde: number; no_pagados: number; sin_asignar: number; recaudado: number };
+  /** Cierre de pago usado (ISO UTC) o null si está pendiente */
+  cierre: string | null;
 }
 
 interface Perfil {
@@ -111,6 +128,8 @@ function calzaNombreEnEmail(p: Perfil, pago: PagoMp): boolean {
   return false;
 }
 
+const ORDEN: Record<EstadoPago, number> = { no_pagado: 0, pagado_tarde: 1, pagado: 2 };
+
 export function claveNombre(pagador: string): string | null {
   const n = normalizarNombre(pagador);
   return n.split(' ').filter(Boolean).length >= 2 ? n : null;
@@ -122,20 +141,28 @@ function aliasDe(pago: PagoMp, aliases: AliasPagador[]): AliasPagador | undefine
     || aliases.find((a) => a.payer_name_norm && pago.nombres.some((n) => claveNombre(n) === a.payer_name_norm));
 }
 
-const visible = (p: PagoMp): PagoVisible => ({ id: p.id, fecha: p.fecha, monto: p.monto, pagador: p.pagador });
+const visible = (p: PagoMp, cierre: Date | string | null): PagoVisible => ({
+  id: p.id, fecha: p.fecha, monto: p.monto, pagador: p.pagador,
+  fecha_clt: fechaHoraClt(p.fecha), tarde: esPagoTarde(p.fecha, cierre),
+});
 
 export function cruzarPagos(
   titulares: Titular[],
   pagos: PagoMp[],
   aliases: AliasPagador[] = [],
   nombreDe: (userId: string) => string | undefined = () => undefined,
+  /** Cierre de pago (lib/mp/cierre.ts). null/omitido = pendiente: nadie paga tarde. */
+  cierre: Date | string | null = null,
 ): ResultadoCruce {
+  const vis = (p: PagoMp) => visible(p, cierre);
   const perfiles = titulares.map(perfil);
   const porUser = new Map(perfiles.map((p) => [p.t.user_id, p]));
   const asignado = new Map<string, PagoVisible & { via: Via }>();
   const sin: PagoSinAsignar[] = [];
 
-  const ordenados = [...pagos].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  // Por instante (MP mezcla offsets -04:00/-03:00): si un jugador pagó dos veces, vale el primero.
+  const t = (x: PagoMp) => { const n = Date.parse(x.fecha); return Number.isNaN(n) ? Infinity : n; };
+  const ordenados = [...pagos].sort((a, b) => t(a) - t(b) || a.id.localeCompare(b.id));
   for (const pago of ordenados) {
     let elegido: Perfil | undefined;
     let via: Via | undefined;
@@ -145,7 +172,7 @@ export function cruzarPagos(
       elegido = porUser.get(al.user_id);
       via = 'alias';
       if (!elegido) {
-        sin.push({ ...visible(pago), motivo: 'no_titular', candidatos: [nombreDe(al.user_id) || 'Jugador'] });
+        sin.push({ ...vis(pago), motivo: 'no_titular', candidatos: [nombreDe(al.user_id) || 'Jugador'] });
         continue;
       }
     }
@@ -160,39 +187,43 @@ export function cruzarPagos(
         pago.nombres.some((n) => calzaNombre(p, n)) || calzaNombreEnEmail(p, pago));
       if (porNombre.length === 1) { elegido = porNombre[0]; via = 'nombre'; }
       else if (porNombre.length > 1) {
-        sin.push({ ...visible(pago), motivo: 'ambiguo', candidatos: porNombre.map((p) => p.t.nombre) });
+        sin.push({ ...vis(pago), motivo: 'ambiguo', candidatos: porNombre.map((p) => p.t.nombre) });
         continue;
       }
     }
 
     if (!elegido || !via) {
-      sin.push({ ...visible(pago), motivo: 'sin_coincidencia', candidatos: [] });
+      sin.push({ ...vis(pago), motivo: 'sin_coincidencia', candidatos: [] });
       continue;
     }
     if (asignado.has(elegido.t.user_id)) {
-      sin.push({ ...visible(pago), motivo: 'duplicado', candidatos: [elegido.t.nombre] });
+      sin.push({ ...vis(pago), motivo: 'duplicado', candidatos: [elegido.t.nombre] });
       continue;
     }
-    asignado.set(elegido.t.user_id, { ...visible(pago), via });
+    asignado.set(elegido.t.user_id, { ...vis(pago), via });
   }
 
   const filas: FilaTitular[] = titulares
     .map((t) => {
       const pago = asignado.get(t.user_id) || null;
-      return { user_id: t.user_id, nombre: t.nombre, estado: pago ? 'pagado' as const : 'no_pagado' as const, pago };
+      const estado: EstadoPago = !pago ? 'no_pagado' : pago.tarde ? 'pagado_tarde' : 'pagado';
+      return { user_id: t.user_id, nombre: t.nombre, estado, pago };
     })
-    .sort((a, b) => (a.estado === b.estado ? a.nombre.localeCompare(b.nombre, 'es') : a.estado === 'no_pagado' ? -1 : 1));
+    // primero los que no pagaron, después los que pagaron tarde, al final los al día
+    .sort((a, b) => ORDEN[a.estado] - ORDEN[b.estado] || a.nombre.localeCompare(b.nombre, 'es'));
 
-  const pagados = filas.filter((f) => f.estado === 'pagado');
+  const cuenta = (e: EstadoPago) => filas.filter((f) => f.estado === e).length;
   return {
     titulares: filas,
     sin_asignar: sin,
     resumen: {
       titulares: filas.length,
-      pagados: pagados.length,
-      no_pagados: filas.length - pagados.length,
+      pagados: cuenta('pagado'),
+      pagados_tarde: cuenta('pagado_tarde'),
+      no_pagados: cuenta('no_pagado'),
       sin_asignar: sin.length,
       recaudado: pagos.reduce((s, p) => s + p.monto, 0),
     },
+    cierre: cierre ? new Date(cierre).toISOString() : null,
   };
 }

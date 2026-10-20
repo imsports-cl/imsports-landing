@@ -2,7 +2,7 @@ import type { AliasPagador, Titular } from '../../lib/mp/cruce';
 import type { Partido, PagosRepo, Sancion } from '../../lib/mp/servicio';
 
 /** BD en memoria. Reproduce el UNIQUE (group_id, user_id, applies_to) de player_sanctions. */
-export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[] }) {
+export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string> }) {
   const sanciones = [...(init.sanciones || [])];
   const aliases = [...(init.aliases || [])];
   const inserts: any[] = [];
@@ -17,6 +17,7 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
       return init.partidos.filter((p) => p.group_id === m.group_id && p.date > m.date && p.status !== 'cancelled')
         .sort((a, b) => a.date.localeCompare(b.date))[0]?.date ?? null;
     },
+    async eventoCierre(m) { return init.cierres?.[m.id] ?? null; },
     async sanciones(g, f) { return sanciones.filter((s) => s.group_id === g && s.applies_to === f); },
     async insertarSancion(s) {
       if (sanciones.some((x) => x.group_id === s.group_id && x.user_id === s.user_id && x.applies_to === s.applies_to)) {

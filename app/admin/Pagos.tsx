@@ -2,6 +2,9 @@
 /**
  * Pestaña "Pagos" del panel admin: quién pagó cada pichanga en MercadoPago
  * (solo lectura). Muestra solo nombre, fecha y monto.
+ *
+ * Estados: ✅ pagó (a tiempo) · 🕓 pagó tarde (después del cierre: NO levanta
+ * la sanción) · ❌ no pagó. Esta pestaña nunca quita ni perdona sanciones.
  */
 import { useEffect, useState } from 'react';
 
@@ -9,17 +12,18 @@ const S = {
   card: '#161616', border: '#2A2A2A', accent: '#00E676', text: '#FFFFFF', dim: '#9A9A9A', red: '#FF8A8A', warn: '#F6C453',
 };
 
-interface PagoV { id: string; fecha: string; monto: number; pagador: string; via?: string }
-interface Fila { user_id: string; nombre: string; estado: 'pagado' | 'no_pagado'; pago: PagoV | null; sancion: string | null }
+interface PagoV { id: string; fecha: string; fecha_clt?: string; tarde?: boolean; monto: number; pagador: string; via?: string }
+interface Fila { user_id: string; nombre: string; estado: 'pagado' | 'pagado_tarde' | 'no_pagado'; pago: PagoV | null; sancion: string | null }
+interface Cierre { en: string | null; fuente: 'match_closed' | 'inicio_partido' | 'pendiente' }
 interface SinAsignar extends PagoV { motivo: string; candidatos: string[] }
 interface Datos {
   configurado: boolean;
   partidos: { id: string; fecha: string; hora: string | null; cancelado: boolean }[];
-  partido: { id: string; fecha: string; hora: string | null; precio: number | null; ventana: { desde: string; hasta: string; cerrada: boolean } };
+  partido: { id: string; fecha: string; hora: string | null; precio: number | null; ventana: { desde: string; hasta: string; cerrada: boolean }; cierre?: Cierre };
   fecha_sancion: string;
   titulares: Fila[];
   sin_asignar: SinAsignar[];
-  resumen: { titulares: number; pagados: number; no_pagados: number; sin_asignar: number; recaudado: number } | null;
+  resumen: { titulares: number; pagados: number; pagados_tarde?: number; no_pagados: number; sin_asignar: number; recaudado: number } | null;
   alias: { id: string; jugador: string; pagador: string }[];
   miembros: { user_id: string; nombre: string }[];
 }
@@ -29,6 +33,11 @@ const fechaCorta = (ymd: string) => { const [, m, d] = ymd.split('-').map(Number
 const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CL', {
   timeZone: 'America/Santiago', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
 });
+const fechaPago = (p: PagoV) => `${p.fecha_clt || fechaHora(p.fecha)} CLT`;
+const FUENTE_CIERRE: Record<string, string> = {
+  match_closed: 'cuando se cerró el partido en la app',
+  inicio_partido: 'inicio del partido (cerrado sin mensaje de cierre)',
+};
 const clp = (n: number) => `$${n.toLocaleString('es-CL')}`;
 const MOTIVO: Record<string, string> = {
   sin_coincidencia: 'No calza con ningún titular',
@@ -74,8 +83,11 @@ export default function Pagos({ token }: { token: string }) {
 
   const sancionar = async (f: Fila) => {
     if (!d) return;
+    const tarde = f.estado === 'pagado_tarde' && f.pago;
     const msg = `¿Cargar sanción "no pagó" a ${f.nombre}?\n\n` +
-      `No aparece su pago de la pichanga del ${fechaCorta(d.partido.fecha)} en MercadoPago.\n` +
+      (tarde
+        ? `Pagó la pichanga del ${fechaCorta(d.partido.fecha)} DESPUÉS del cierre (${fechaPago(f.pago!)}): pagar tarde no levanta la sanción.\n`
+        : `No aparece su pago de la pichanga del ${fechaCorta(d.partido.fecha)} en MercadoPago.\n`) +
       `Pierde cupo la fecha del ${fechaCorta(d.fecha_sancion)} (queda al final, sin puntos).\n\n` +
       `Se puede perdonar después en Titulares → "Pierden cupo esta fecha".`;
     // eslint-disable-next-line no-alert
@@ -121,9 +133,18 @@ export default function Pagos({ token }: { token: string }) {
             ⚠️ MercadoPago no está conectado (falta MP_ACCESS_TOKEN en el servidor). Se muestran los titulares sin estado de pago.
           </p>
         )}
+        {d.partido.cierre && (
+          <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>
+            🔒 Cierre de pago:{' '}
+            {d.partido.cierre.en
+              ? <><b style={{ color: S.text }}>{fechaHora(d.partido.cierre.en)} CLT</b> ({FUENTE_CIERRE[d.partido.cierre.fuente] || d.partido.cierre.fuente}). Lo que llega después es «pagó tarde» y no levanta la sanción.</>
+              : <>pendiente (el partido todavía no se cierra en la app).</>}
+          </p>
+        )}
         {d.resumen && (
           <p style={{ fontSize: 14, margin: '12px 0 0' }}>
-            <b style={{ color: S.accent }}>{d.resumen.pagados}</b> de {d.resumen.titulares} pagaron ·{' '}
+            <b style={{ color: S.accent }}>{d.resumen.pagados}</b> de {d.resumen.titulares} pagaron a tiempo ·{' '}
+            {(d.resumen.pagados_tarde ?? 0) > 0 && <><b style={{ color: S.warn }}>{d.resumen.pagados_tarde}</b> pagaron tarde · </>}
             <b style={{ color: d.resumen.no_pagados ? S.red : S.dim }}>{d.resumen.no_pagados}</b> sin pagar ·{' '}
             {clp(d.resumen.recaudado)} recaudado
             {d.resumen.sin_asignar > 0 && <> · <b style={{ color: S.warn }}>{d.resumen.sin_asignar}</b> pago(s) sin asignar</>}
@@ -141,19 +162,20 @@ export default function Pagos({ token }: { token: string }) {
             </tr></thead>
             <tbody>
               {d.titulares.map((f) => (
-                <tr key={f.user_id} style={f.estado === 'no_pagado' ? { background: 'rgba(255,107,107,0.06)' } : undefined}>
+                <tr key={f.user_id} style={f.estado === 'no_pagado' ? { background: 'rgba(255,107,107,0.06)' } : f.estado === 'pagado_tarde' ? { background: 'rgba(246,196,83,0.06)' } : undefined}>
                   <td style={{ ...td, fontWeight: 700 }}>{f.nombre}</td>
-                  <td style={{ ...td, fontSize: 13, color: f.estado === 'pagado' ? S.accent : S.red }}>
+                  <td style={{ ...td, fontSize: 13, color: f.estado === 'pagado' ? S.accent : f.estado === 'pagado_tarde' ? S.warn : S.red }}>
                     {!d.configurado ? <span style={{ color: S.dim }}>—</span>
                       : f.estado === 'pagado' ? <>✅ Pagó <span style={{ color: S.dim }}>· {f.pago?.pagador} · por {VIA[f.pago?.via || ''] || f.pago?.via}</span></>
+                      : f.estado === 'pagado_tarde' ? <>🕓 Pagó tarde <span style={{ color: S.dim }}>· {fechaPago(f.pago!)} · {f.pago?.pagador} · por {VIA[f.pago?.via || ''] || f.pago?.via}</span></>
                       : '❌ No pagó'}
                   </td>
-                  <td style={{ ...td, color: S.dim, fontSize: 13 }}>{f.pago ? fechaHora(f.pago.fecha) : '—'}</td>
+                  <td style={{ ...td, color: f.estado === 'pagado_tarde' ? S.warn : S.dim, fontSize: 13 }}>{f.pago ? fechaPago(f.pago) : '—'}</td>
                   <td style={td}>{f.pago ? clp(f.pago.monto) : '—'}</td>
                   <td style={{ ...td, textAlign: 'right' }}>
                     {f.sancion ? (
                       <span style={{ color: S.red, fontSize: 12 }}>⛔ {f.sancion === 'no_pago' ? 'sancionado' : f.sancion} {fechaCorta(d.fecha_sancion)}</span>
-                    ) : d.configurado && f.estado === 'no_pagado' ? (
+                    ) : d.configurado && f.estado !== 'pagado' ? (
                       <button onClick={() => sancionar(f)} disabled={busy !== null} style={btn('#FF6B6B')}
                         title={`Pierde cupo el ${fechaCorta(d.fecha_sancion)}`}>
                         Cargar sanción no_pago
@@ -167,6 +189,7 @@ export default function Pagos({ token }: { token: string }) {
         </div>
         <p style={{ color: S.dim, fontSize: 12, margin: '12px 0 0' }}>
           La banca no paga. El cruce es por mapeo manual, correo o nombre + apellido (nunca solo por el primer nombre).
+          Pagar después del cierre no levanta la sanción: «pagó tarde» se puede sancionar igual y esta pestaña nunca quita sanciones.
         </p>
       </section>
 
@@ -181,7 +204,7 @@ export default function Pagos({ token }: { token: string }) {
                   {d.sin_asignar.map((p) => (
                     <tr key={p.id}>
                       <td style={{ ...td, fontWeight: 600 }}>{p.pagador}</td>
-                      <td style={{ ...td, color: S.dim, fontSize: 13 }}>{fechaHora(p.fecha)}</td>
+                      <td style={{ ...td, color: p.tarde ? S.warn : S.dim, fontSize: 13 }}>{fechaPago(p)}{p.tarde ? ' · tarde' : ''}</td>
                       <td style={td}>{clp(p.monto)}</td>
                       <td style={{ ...td, color: S.dim, fontSize: 13 }}>
                         {MOTIVO[p.motivo] || p.motivo}{p.candidatos.length ? `: ${p.candidatos.join(', ')}` : ''}

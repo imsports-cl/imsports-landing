@@ -7,6 +7,7 @@ import { aPagoMp, esPagoDePichanga, type PagoMpRaw } from './pagos-mp';
 import { claveNombre, cruzarPagos, type AliasPagador, type ResultadoCruce, type Titular } from './cruce';
 import { isoSantiago, santiagoAUtc, ventanaPagos } from './tiempo';
 import { normalizarEmail } from './normalizar';
+import { cierrePago, type CierrePago } from './cierre';
 
 export interface Partido {
   id: string; group_id: string; date: string; time: string | null;
@@ -23,6 +24,11 @@ export interface PagosRepo {
   aliases(groupId: string): Promise<(AliasPagador & { id: string; payer_label: string | null })[]>;
   /** Fecha (YYYY-MM-DD) del siguiente partido no cancelado del grupo, o null */
   siguienteFecha(match: Partido): Promise<string | null>;
+  /**
+   * created_at del PRIMER mensaje system 'match_closed' del partido (group_messages),
+   * o null. Es el cierre de pago: ver lib/mp/cierre.ts. Solo lectura.
+   */
+  eventoCierre(match: Partido): Promise<string | null>;
   sanciones(groupId: string, appliesTo: string): Promise<Sancion[]>;
   /** INSERT simple (sin upsert). Debe lanzar { code: '23505' } si ya existe. */
   insertarSancion(s: Sancion & { group_id: string; created_by: string | null }): Promise<void>;
@@ -83,22 +89,27 @@ async function titularesQuePagan(deps: Deps, m: Partido): Promise<Titular[]> {
 
 async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
   const v = ventanaPagos(m.date, m.time, deps.ahora());
-  if (!deps.mp) return { v, cruce: null as ResultadoCruce | null };
+  const cierre: CierrePago = cierrePago(m, await deps.repo.eventoCierre(m));
+  if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null };
   if (v.hasta.getTime() <= v.desde.getTime()) {
-    return { v, cruce: cruzarPagos(tit, []) };
+    return { v, cierre, cruce: cruzarPagos(tit, [], [], undefined, cierre.en) };
   }
   const raw = await deps.mp.buscarAprobados(isoSantiago(v.desde), isoSantiago(v.hasta));
   const pagos = raw.filter((r) => esPagoDePichanga(r, m.price != null ? Number(m.price) : null)).map(aPagoMp);
   const [aliases, miembros] = await Promise.all([deps.repo.aliases(m.group_id), deps.repo.miembros(m.group_id)]);
   const nombres = new Map(miembros.map((x) => [x.user_id, x.nombre]));
-  return { v, cruce: cruzarPagos(tit, pagos, aliases, (id) => nombres.get(id)) };
+  return { v, cierre, cruce: cruzarPagos(tit, pagos, aliases, (id) => nombres.get(id), cierre.en) };
 }
 
-/** GET del panel. Devuelve SOLO nombre, fecha y monto; nunca correos ni documentos. */
+/**
+ * GET del panel. Devuelve SOLO nombre, fecha y monto; nunca correos ni documentos.
+ * SOLO LECTURA: no escribe ni borra sanciones. Un «pagó tarde» sigue sancionable
+ * y una sanción existente se muestra tal cual (nunca se perdona sola).
+ */
 export async function estadoPagos(deps: Deps, groupId: string, matchId?: string | null) {
   const { m, recientes } = await elegirPartido(deps, groupId, matchId);
   const tit = await titularesQuePagan(deps, m);
-  const { v, cruce: c } = await cruce(deps, m, tit);
+  const { v, cierre, cruce: c } = await cruce(deps, m, tit);
   const fecha_sancion = await fechaSancion(deps.repo, m);
   const [sanc, aliases, miembros] = await Promise.all([
     deps.repo.sanciones(m.group_id, fecha_sancion),
@@ -114,6 +125,8 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
     partido: {
       id: m.id, fecha: ymd(m.date), hora: m.time, precio: m.price != null ? Number(m.price) : null,
       ventana: { desde: v.desde.toISOString(), hasta: v.hasta.toISOString(), cerrada: v.cerrada },
+      /** Cierre de pago: después de esto el pago es «pagó tarde» y no levanta la sanción */
+      cierre,
     },
     fecha_sancion,
     titulares: (c?.titulares ?? tit.map((t) => ({ user_id: t.user_id, nombre: t.nombre, estado: 'no_pagado' as const, pago: null })))
@@ -164,8 +177,9 @@ export async function sancionarNoPago(
   if (!jugador) throw new ErrorPagos('no es titular de este partido (o no paga)');
   if (!deps.mp) throw new ErrorPagos('sin MercadoPago no se puede verificar el pago', 503);
   const { cruce: c } = await cruce(deps, m, tit);
+  // Solo bloquea a quien pagó A TIEMPO. «Pagó tarde» no levanta la sanción: se puede cargar.
   if (c?.titulares.find((f) => f.user_id === jugador.user_id)?.estado === 'pagado') {
-    throw new ErrorPagos(`${jugador.nombre} figura con pago`, 409);
+    throw new ErrorPagos(`${jugador.nombre} figura con pago a tiempo`, 409);
   }
 
   const applies_to = await fechaSancion(deps.repo, m);
