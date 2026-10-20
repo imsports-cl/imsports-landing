@@ -7,6 +7,7 @@
  * la sanción) · ❌ no pagó. Esta pestaña nunca quita ni perdona sanciones.
  */
 import { useEffect, useState } from 'react';
+import { horaClt } from '../../lib/mp/tiempo';
 
 const S = {
   card: '#161616', border: '#2A2A2A', accent: '#00E676', text: '#FFFFFF', dim: '#9A9A9A', red: '#FF8A8A', warn: '#F6C453',
@@ -18,6 +19,8 @@ interface Cierre { en: string | null; fuente: 'match_closed' | 'inicio_partido' 
 interface SinAsignar extends PagoV { motivo: string; candidatos: string[] }
 interface Datos {
   configurado: boolean;
+  /** ISO: hora del servidor al consultar MercadoPago */
+  revisado_at?: string;
   partidos: { id: string; fecha: string; hora: string | null; cancelado: boolean }[];
   partido: { id: string; fecha: string; hora: string | null; precio: number | null; ventana: { desde: string; hasta: string; cerrada: boolean }; cierre?: Cierre };
   fecha_sancion: string;
@@ -54,15 +57,27 @@ export default function Pagos({ token }: { token: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [asignar, setAsignar] = useState<Record<string, string>>({});
 
+  const [revisando, setRevisando] = useState(false);
+
+  // Si falla, deja los datos anteriores en pantalla y solo muestra el error.
   const cargar = async (id = matchId) => {
     setErr(null);
-    const r = await fetch(`/admin/api/pagos${id ? `?match_id=${encodeURIComponent(id)}` : ''}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { setErr(j.error || 'No se pudieron cargar los pagos'); return; }
-    setD(j);
-    if (!id) setMatchId(j.partido.id);
+    try {
+      const r = await fetch(`/admin/api/pagos${id ? `?match_id=${encodeURIComponent(id)}` : ''}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(j.error || `No se pudieron cargar los pagos (${r.status})`); return; }
+      setD(j);
+      if (!id) setMatchId(j.partido.id);
+    } catch {
+      setErr('No se pudo conectar con el servidor. Revisa tu conexión e intenta de nuevo.');
+    }
+  };
+  const revisar = async () => {
+    setRevisando(true);
+    try { await cargar(); } finally { setRevisando(false); }
   };
   useEffect(() => { cargar(); /* eslint-disable-next-line */ }, [token]);
 
@@ -119,6 +134,15 @@ export default function Pagos({ token }: { token: string }) {
               {!d.partido.ventana.cerrada && ' (sigue abierta: 5 días desde el partido)'}
             </p>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+            <button onClick={revisar} disabled={revisando || busy !== null}
+              style={{ ...btn(S.accent), padding: '6px 12px', fontSize: 13, opacity: revisando ? 0.6 : 1, cursor: revisando ? 'wait' : 'pointer' }}
+              title="Consulta MercadoPago ahora y actualiza pagó / pagó tarde / no pagó">
+              {revisando ? 'Revisando…' : '🔄 Revisar pagos'}
+            </button>
+            {d.revisado_at && <span style={{ color: S.dim, fontSize: 12 }}>Última revisión: {horaClt(d.revisado_at)}</span>}
+          </div>
           <label style={{ color: S.dim, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
             Pichanga
             <select value={matchId} onChange={(e) => { setMatchId(e.target.value); setD(null); cargar(e.target.value); }} style={sel}>
@@ -127,6 +151,7 @@ export default function Pagos({ token }: { token: string }) {
               ))}
             </select>
           </label>
+          </div>
         </div>
         {!d.configurado && (
           <p style={{ color: S.warn, fontSize: 13, margin: '12px 0 0' }}>

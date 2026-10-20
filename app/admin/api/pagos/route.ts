@@ -26,6 +26,9 @@ const NO_PAGAN = ['bmadain@gmail.com'];
 const GRUPO_ID = 'a812c96c-2193-41fe-b35a-a2b6159ed57f';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' };
 
 async function requireAdmin(req: NextRequest) {
   const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
@@ -64,7 +67,8 @@ export async function GET(req: NextRequest) {
   const { deny } = await requireAdmin(req);
   if (deny) return deny;
   try {
-    return NextResponse.json(await estadoPagos(deps(), GRUPO_ID, req.nextUrl.searchParams.get('match_id')));
+    // Cada GET consulta MercadoPago en el momento: nunca cachear (botón «Revisar pagos»)
+    return NextResponse.json(await estadoPagos(deps(), GRUPO_ID, req.nextUrl.searchParams.get('match_id')), { headers: NO_STORE });
   } catch (e) { return fallo(e); }
 }
 
