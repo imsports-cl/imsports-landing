@@ -1,8 +1,9 @@
--- 030 · mp_payer_aliases: mapeo manual pagador de MercadoPago → jugador.
+-- 032 · mp_payer_aliases: mapeo manual pagador de MercadoPago → jugador.
 --
 -- NO se aplica con el deploy ni con el merge del PR. Se corre aparte en
 -- Supabase (project whxufmuakpmuyiatfttr), con OK de Barham.
--- Rollback: 030_mp_payer_aliases_rollback.sql
+-- Rollback: 032_mp_payer_aliases_rollback.sql
+-- (Renombrada de 030 → 032: el 030 ya existe en la app.)
 --
 -- Del pagador NO se guarda el correo: solo su hash SHA-256 (correo en
 -- minúsculas y sin acentos), el id de pagador de MP y el nombre normalizado.
@@ -48,8 +49,10 @@ ALTER TABLE public.mp_payer_aliases ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON public.mp_payer_aliases FROM anon;
 REVOKE ALL ON public.mp_payer_aliases FROM authenticated;
+REVOKE ALL ON public.mp_payer_aliases FROM service_role;
+-- GRANTs explícitos: nada a anon.
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.mp_payer_aliases TO authenticated;
-GRANT ALL ON public.mp_payer_aliases TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mp_payer_aliases TO service_role;
 
 CREATE POLICY mpa_admin_select ON public.mp_payer_aliases
   FOR SELECT TO authenticated USING (public.is_group_admin(group_id));
