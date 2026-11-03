@@ -3,9 +3,9 @@
  */
 import 'server-only';
 import { supabase as db } from '../supabase';
-import type { PagosRepo, Partido } from './servicio';
+import { inicioPartido, TITULARES_INCOMPLETO, type PagosRepo, type Partido } from './servicio';
 
-const PARTIDO = 'id, group_id, date, time, price, status, phase';
+const PARTIDO = 'id, group_id, date, time, price, status, phase, created_at';
 
 function err(e: any) {
   if (e) { const x: any = new Error(e.message || 'error de base de datos'); x.code = e.code; throw x; }
@@ -25,21 +25,60 @@ export const repoSupabase: PagosRepo = {
     return (data as Partido) || null;
   },
   async titulares(m) {
-    const [{ data: confs, error }, { data: members }] = await Promise.all([
-      db.from('match_confirmations')
-        .select('user_id, user:users(display_name, email)')
-        .eq('match_id', m.id).eq('status', 'confirmed').eq('is_starter', true),
-      db.from('group_members').select('user_id, nickname').eq('group_id', m.group_id),
-    ]);
-    err(error);
+    const todos = await this.titularesDe([m]);
+    return todos[m.id] || [];
+  },
+  async titularesDe(matches) {
+    if (!matches.length) return {};
+    const ids = matches.map((m) => m.id);
+    const PAGINA = 1000;
+    const confs: any[] = [];
+    let total: number | null = null;
+    let members: any[] = [];
+    let desde = 0;
+    let cortado = false;
+    for (let pagina = 0; pagina < 30; pagina++) {
+      const confirmaciones = db.from('match_confirmations')
+        .select('match_id, user_id, user:users(display_name, email)', { count: 'exact' })
+        .in('match_id', ids).eq('status', 'confirmed').eq('is_starter', true)
+        .order('match_id', { ascending: true })
+        .order('user_id', { ascending: true })
+        .range(desde, desde + PAGINA - 1);
+      const miembros = pagina === 0
+        ? db.from('group_members').select('user_id, nickname').eq('group_id', matches[0].group_id)
+        : null;
+      const [confRes, memRes] = await Promise.all([
+        confirmaciones,
+        miembros ?? Promise.resolve({ data: members, error: null }),
+      ]);
+      err(confRes.error);
+      if (memRes) err((memRes as { error: any }).error);
+      if (pagina === 0) members = (memRes as { data: any[] | null }).data || [];
+      if (total == null && typeof confRes.count === 'number') total = confRes.count;
+      const page = confRes.data || [];
+      confs.push(...page);
+      if (page.length < PAGINA) break;
+      desde += PAGINA;
+      if (total != null && confs.length >= total) break;
+      if (pagina === 29) cortado = true;
+    }
     const nick = new Map((members || []).map((x: any) => [x.user_id, x.nickname as string | null]));
-    return (confs || []).map((c: any) => ({
-      user_id: c.user_id,
-      nombre: nick.get(c.user_id) || c.user?.display_name || 'Jugador',
-      display_name: c.user?.display_name ?? null,
-      nickname: nick.get(c.user_id) ?? null,
-      email: c.user?.email ?? null,
-    }));
+    const out: Record<string, { user_id: string; nombre: string; display_name: string | null; nickname: string | null; email: string | null }[]> = {};
+    for (const id of ids) out[id] = [];
+    for (const c of confs) {
+      const fila = {
+        user_id: c.user_id,
+        nombre: nick.get(c.user_id) || c.user?.display_name || 'Jugador',
+        display_name: c.user?.display_name ?? null,
+        nickname: nick.get(c.user_id) ?? null,
+        email: c.user?.email ?? null,
+      };
+      (out[c.match_id] ||= []).push(fila);
+    }
+    if (cortado || (total != null && confs.length !== total)) {
+      (out as any)[TITULARES_INCOMPLETO] = true;
+    }
+    return out;
   },
   async miembros(groupId) {
     const { data, error } = await db.from('group_members')
@@ -74,6 +113,61 @@ export const repoSupabase: PagosRepo = {
       .order('created_at', { ascending: true }).limit(1);
     err(error);
     return (data?.[0] as any)?.created_at ?? null;
+  },
+  async eventoConvocatoria(m) {
+    // Primer aviso de convocatoria de ESTE partido (kind match_convocatoria).
+    const { data, error } = await db.from('group_messages').select('created_at')
+      .eq('group_id', m.group_id).eq('type', 'system')
+      .eq('metadata->>kind', 'match_convocatoria').eq('metadata->>match_id', m.id)
+      .order('created_at', { ascending: true }).limit(1);
+    err(error);
+    return (data?.[0] as any)?.created_at ?? null;
+  },
+  async partidoAnterior(m) {
+    const { data, error } = await db.from('matches').select(PARTIDO)
+      .eq('group_id', m.group_id).lte('date', m.date).neq('id', m.id).neq('status', 'cancelled')
+      .order('date', { ascending: false }).limit(15);
+    err(error);
+    const inicio = inicioPartido(m).getTime();
+    return ((data || []) as Partido[])
+      .filter((p) => inicioPartido(p).getTime() < inicio)
+      .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
+  },
+  async partidosActivos(groupId, desde, hasta, limite) {
+    const { data, error } = await db.from('matches').select(PARTIDO)
+      .eq('group_id', groupId).neq('status', 'cancelled')
+      .gte('date', desde).lt('date', hasta)
+      .order('date', { ascending: false }).limit(limite);
+    err(error);
+    return ((data || []) as Partido[])
+      .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime());
+  },
+  async convocatorias(groupId, matchIds) {
+    const out: Record<string, string> = {};
+    if (!matchIds.length) return out;
+    const { data, error } = await db.from('group_messages').select('created_at, metadata')
+      .eq('group_id', groupId).eq('type', 'system')
+      .eq('metadata->>kind', 'match_convocatoria')
+      .in('metadata->>match_id', matchIds)
+      .order('created_at', { ascending: true });
+    err(error);
+    for (const row of (data || []) as { created_at?: string; metadata?: { match_id?: string } }[]) {
+      const id = row.metadata?.match_id;
+      const at = row.created_at;
+      if (!id || !at || out[id]) continue; // ya ordenado: el primero es el más antiguo
+      out[id] = at;
+    }
+    return out;
+  },
+  async partidoSiguiente(m) {
+    const { data, error } = await db.from('matches').select(PARTIDO)
+      .eq('group_id', m.group_id).gte('date', m.date).neq('id', m.id).neq('status', 'cancelled')
+      .order('date', { ascending: true }).limit(15);
+    err(error);
+    const inicio = inicioPartido(m).getTime();
+    return ((data || []) as Partido[])
+      .filter((p) => inicioPartido(p).getTime() > inicio)
+      .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime())[0] ?? null;
   },
   async sanciones(groupId, appliesTo) {
     const { data, error } = await db.from('player_sanctions')

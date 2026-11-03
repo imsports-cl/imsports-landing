@@ -32,7 +32,7 @@ export interface AliasPagador {
 }
 
 export type Via = 'alias' | 'email' | 'nombre';
-export type MotivoSinAsignar = 'sin_coincidencia' | 'ambiguo' | 'duplicado' | 'no_titular';
+export type MotivoSinAsignar = 'sin_coincidencia' | 'ambiguo' | 'duplicado' | 'no_titular' | 'fuera_de_ventana';
 
 export interface PagoVisible {
   id: string; fecha: string; monto: number; pagador: string;
@@ -65,7 +65,9 @@ export interface PagoSinAsignar extends PagoVisible {
 export interface ResultadoCruce {
   titulares: FilaTitular[];
   sin_asignar: PagoSinAsignar[];
-    /** pagados = a tiempo; pagados_tarde aparte (siguen sancionables); no_pagados = sin pago */
+    /** pagados = a tiempo; pagados_tarde aparte (siguen sancionables); no_pagados = sin pago.
+     *  recaudado = solo pagos asignados a un titular: un pago del mismo monto sin
+     *  identidad (o sin asignar) no infla el total. */
   resumen: { titulares: number; pagados: number; pagados_tarde: number; no_pagados: number; sin_asignar: number; recaudado: number };
   /** Cierre de pago usado (ISO UTC) o null si está pendiente */
   cierre: string | null;
@@ -141,6 +143,40 @@ function aliasDe(pago: PagoMp, aliases: AliasPagador[]): AliasPagador | undefine
     || aliases.find((a) => a.payer_name_norm && pago.nombres.some((n) => claveNombre(n) === a.payer_name_norm));
 }
 
+/** A quién apunta este pago, sin mirar si ese jugador ya tiene otro. */
+export function identificarPago(
+  titulares: Titular[],
+  pago: PagoMp,
+  aliases: AliasPagador[] = [],
+): { tipo: 'unico'; userId: string } | { tipo: 'ambiguo'; userIds: string[] } | { tipo: 'ninguno' } {
+  const perfiles = titulares.map(perfil);
+  const porUser = new Map(perfiles.map((p) => [p.t.user_id, p]));
+  const al = aliasDe(pago, aliases);
+  if (al) {
+    return porUser.has(al.user_id) ? { tipo: 'unico', userId: al.user_id } : { tipo: 'ninguno' };
+  }
+  let elegido: string | undefined;
+  const porEmail = perfiles.filter((p) => calzaEmail(p, pago));
+  if (porEmail.length === 1) elegido = porEmail[0].t.user_id;
+  if (!elegido) {
+    const porNombre = perfiles.filter((p) =>
+      pago.nombres.some((n) => calzaNombre(p, n)) || calzaNombreEnEmail(p, pago));
+    if (porNombre.length === 1) elegido = porNombre[0].t.user_id;
+    else if (porNombre.length > 1) return { tipo: 'ambiguo', userIds: porNombre.map((p) => p.t.user_id) };
+  }
+  return elegido ? { tipo: 'unico', userId: elegido } : { tipo: 'ninguno' };
+}
+
+/** Si dos titulares se llaman igual, la inicial del apellido los distingue en el aviso. */
+function etiquetasAmbiguas(ts: Titular[]): string[] {
+  return ts.map((t) => {
+    const partes = (t.display_name || '').trim().split(/\s+/).filter(Boolean);
+    const apellido = partes.length > 1 ? partes[partes.length - 1] : '';
+    const repetido = ts.filter((x) => x.nombre === t.nombre).length > 1;
+    return repetido && apellido ? `${t.nombre} ${apellido[0].toUpperCase()}.` : t.nombre;
+  });
+}
+
 const visible = (p: PagoMp, cierre: Date | string | null): PagoVisible => ({
   id: p.id, fecha: p.fecha, monto: p.monto, pagador: p.pagador,
   fecha_clt: fechaHoraClt(p.fecha), tarde: esPagoTarde(p.fecha, cierre),
@@ -153,6 +189,8 @@ export function cruzarPagos(
   nombreDe: (userId: string) => string | undefined = () => undefined,
   /** Cierre de pago (lib/mp/cierre.ts). null/omitido = pendiente: nadie paga tarde. */
   cierre: Date | string | null = null,
+  /** Pagos fuera de [convocatoria, pitazo+5d): se muestran, no se asignan ni suman. */
+  fuera: PagoMp[] = [],
 ): ResultadoCruce {
   const vis = (p: PagoMp) => visible(p, cierre);
   const perfiles = titulares.map(perfil);
@@ -187,7 +225,7 @@ export function cruzarPagos(
         pago.nombres.some((n) => calzaNombre(p, n)) || calzaNombreEnEmail(p, pago));
       if (porNombre.length === 1) { elegido = porNombre[0]; via = 'nombre'; }
       else if (porNombre.length > 1) {
-        sin.push({ ...vis(pago), motivo: 'ambiguo', candidatos: porNombre.map((p) => p.t.nombre) });
+        sin.push({ ...vis(pago), motivo: 'ambiguo', candidatos: etiquetasAmbiguas(porNombre.map((p) => p.t)) });
         continue;
       }
     }
@@ -201,6 +239,10 @@ export function cruzarPagos(
       continue;
     }
     asignado.set(elegido.t.user_id, { ...vis(pago), via });
+  }
+
+  for (const p of fuera) {
+    sin.push({ ...vis(p), motivo: 'fuera_de_ventana', candidatos: [] });
   }
 
   const filas: FilaTitular[] = titulares
@@ -222,7 +264,7 @@ export function cruzarPagos(
       pagados_tarde: cuenta('pagado_tarde'),
       no_pagados: cuenta('no_pagado'),
       sin_asignar: sin.length,
-      recaudado: pagos.reduce((s, p) => s + p.monto, 0),
+      recaudado: filas.reduce((s, f) => s + (f.pago ? f.pago.monto : 0), 0),
     },
     cierre: cierre ? new Date(cierre).toISOString() : null,
   };

@@ -1,8 +1,8 @@
 import type { AliasPagador, Titular } from '../../lib/mp/cruce';
-import type { Partido, PagosRepo, Sancion } from '../../lib/mp/servicio';
+import { inicioPartido, type Partido, type PagosRepo, type Sancion } from '../../lib/mp/servicio';
 
 /** BD en memoria. Reproduce el UNIQUE (group_id, user_id, applies_to) de player_sanctions. */
-export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string> }) {
+export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string>; convocatorias?: Record<string, string | null> }) {
   const sanciones = [...(init.sanciones || [])];
   const aliases = [...(init.aliases || [])];
   const inserts: any[] = [];
@@ -11,6 +11,11 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
     async partidosRecientes(g, n) { return init.partidos.filter((p) => p.group_id === g).sort((a, b) => b.date.localeCompare(a.date)).slice(0, n); },
     async partido(id) { return init.partidos.find((p) => p.id === id) || null; },
     async titulares(m) { return init.titulares[m.id] || []; },
+    async titularesDe(matches) {
+      const out: Record<string, Titular[]> = {};
+      for (const m of matches) out[m.id] = init.titulares[m.id] || [];
+      return out;
+    },
     async miembros() { return miembros; },
     async aliases(g) { return aliases.filter((a) => a.group_id === g); },
     async siguienteFecha(m) {
@@ -18,6 +23,38 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
         .sort((a, b) => a.date.localeCompare(b.date))[0]?.date ?? null;
     },
     async eventoCierre(m) { return init.cierres?.[m.id] ?? null; },
+    async eventoConvocatoria(m) { return init.convocatorias?.[m.id] ?? null; },
+    async partidoAnterior(m) {
+      const inicio = inicioPartido(m).getTime();
+      return init.partidos
+        .filter((p) => p.group_id === m.group_id && p.id !== m.id && p.status !== 'cancelled' && inicioPartido(p).getTime() < inicio)
+        .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
+    },
+    async partidosActivos(g, desde, hasta, limite) {
+      const a = Date.parse(desde);
+      const b = Date.parse(hasta);
+      return init.partidos.filter((p) => p.group_id === g && p.status !== 'cancelled'
+        && inicioPartido(p).getTime() >= a && inicioPartido(p).getTime() < b)
+        .sort((x, y) => inicioPartido(y).getTime() - inicioPartido(x).getTime())
+        .slice(0, limite)
+        .sort((x, y) => inicioPartido(x).getTime() - inicioPartido(y).getTime());
+    },
+    async convocatorias(g, ids) {
+      const set = new Set(ids);
+      const out: Record<string, string> = {};
+      const pares = init.partidos
+        .filter((p) => p.group_id === g && set.has(p.id) && init.convocatorias?.[p.id])
+        .map((p) => ({ id: p.id, at: init.convocatorias![p.id] as string }))
+        .sort((x, y) => x.at.localeCompare(y.at));
+      for (const p of pares) if (!out[p.id]) out[p.id] = p.at;
+      return out;
+    },
+    async partidoSiguiente(m) {
+      const inicio = inicioPartido(m).getTime();
+      return init.partidos
+        .filter((p) => p.group_id === m.group_id && p.id !== m.id && p.status !== 'cancelled' && inicioPartido(p).getTime() > inicio)
+        .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime())[0] ?? null;
+    },
     async sanciones(g, f) { return sanciones.filter((s) => s.group_id === g && s.applies_to === f); },
     async insertarSancion(s) {
       if (sanciones.some((x) => x.group_id === s.group_id && x.user_id === s.user_id && x.applies_to === s.applies_to)) {

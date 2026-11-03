@@ -7,22 +7,24 @@
  * la sanción) · ❌ no pagó. Esta pestaña nunca quita ni perdona sanciones.
  */
 import { useEffect, useRef, useState } from 'react';
-import { horaClt } from '../../lib/mp/tiempo';
+import { DIAS_VENTANA, horaClt } from '../../lib/mp/tiempo';
 
 const S = {
   card: '#161616', border: '#2A2A2A', accent: '#00E676', text: '#FFFFFF', dim: '#9A9A9A', red: '#FF8A8A', warn: '#F6C453',
 };
 
 interface PagoV { id: string; fecha: string; fecha_clt?: string; tarde?: boolean; monto: number; pagador: string; via?: string }
-interface Fila { user_id: string; nombre: string; estado: 'pagado' | 'pagado_tarde' | 'no_pagado'; pago: PagoV | null; sancion: string | null }
+interface Fila { user_id: string; nombre: string; estado: 'pagado' | 'pagado_tarde' | 'no_pagado'; pago: PagoV | null; sancion: string | null; solape?: boolean }
 interface Cierre { en: string | null; fuente: 'match_closed' | 'inicio_partido' | 'pendiente' }
 interface SinAsignar extends PagoV { motivo: string; candidatos: string[] }
 interface Datos {
   configurado: boolean;
+  mp_incompleto?: boolean;
+  historial_incompleto?: boolean;
   /** ISO: hora del servidor al consultar MercadoPago */
   revisado_at?: string;
   partidos: { id: string; fecha: string; hora: string | null; cancelado: boolean }[];
-  partido: { id: string; fecha: string; hora: string | null; precio: number | null; ventana: { desde: string; hasta: string; cerrada: boolean }; cierre?: Cierre };
+  partido: { id: string; fecha: string; hora: string | null; precio: number | null; ventana: { desde: string; hasta: string; cerrada: boolean; solapa?: boolean }; cierre?: Cierre };
   fecha_sancion: string;
   titulares: Fila[];
   sin_asignar: SinAsignar[];
@@ -47,6 +49,7 @@ const MOTIVO: Record<string, string> = {
   ambiguo: 'Calza con más de uno',
   duplicado: 'Segundo pago del mismo jugador',
   no_titular: 'Mapeado a alguien que no es titular',
+  fuera_de_ventana: 'Fuera de ventana (no cuenta para esta pichanga)',
 };
 const VIA: Record<string, string> = { alias: 'mapeo manual', email: 'correo', nombre: 'nombre' };
 
@@ -136,8 +139,23 @@ export default function Pagos({ token }: { token: string }) {
             <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>
               {d.partido.precio ? `${clp(d.partido.precio)} por titular · ` : ''}
               pagos aprobados en MercadoPago desde {fechaHora(d.partido.ventana.desde)} hasta {fechaHora(d.partido.ventana.hasta)}
-              {!d.partido.ventana.cerrada && ' (sigue abierta: 5 días desde el partido)'}
+              {!d.partido.ventana.cerrada && ` (sigue abierta: cierra ${DIAS_VENTANA} días después del partido)`}
             </p>
+          {d.mp_incompleto && (
+            <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
+              Mercado Pago devolvió demasiados pagos para esta ventana. Los estados quedan sin certeza: no se puede sancionar hasta que la búsqueda quepa.
+            </p>
+          )}
+          {d.historial_incompleto && (
+            <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
+              El historial de pichangas que se solapan supera el tope (200 partidos o 2 años). No se puede sancionar: la conciliación quedaría incompleta.
+            </p>
+          )}
+          {d.partido.ventana.solapa && (
+            <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
+              Esta ventana se solapa con otra pichanga. Un pago del tramo común se asigna a la más antigua que ese jugador todavía no tiene pagada. Revísalo antes de sancionar.
+            </p>
+          )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -198,7 +216,7 @@ export default function Pagos({ token }: { token: string }) {
                     {!d.configurado ? <span style={{ color: S.dim }}>—</span>
                       : f.estado === 'pagado' ? <>✅ Pagó <span style={{ color: S.dim }}>· {f.pago?.pagador} · por {VIA[f.pago?.via || ''] || f.pago?.via}</span></>
                       : f.estado === 'pagado_tarde' ? <>🕓 Pagó tarde <span style={{ color: S.dim }}>· {fechaPago(f.pago!)} · {f.pago?.pagador} · por {VIA[f.pago?.via || ''] || f.pago?.via}</span></>
-                      : '❌ No pagó'}
+                      : <>❌ No pagó{f.solape && <span style={{ color: S.warn }}> · {f.nombre}: {d.historial_incompleto ? 'historial incompleto, no sancionar' : 'pago en el solape, no sancionar sin revisar'}</span>}</>}
                   </td>
                   <td style={{ ...td, color: f.estado === 'pagado_tarde' ? S.warn : S.dim, fontSize: 13 }}>{f.pago ? fechaPago(f.pago) : '—'}</td>
                   <td style={td}>{f.pago ? clp(f.pago.monto) : '—'}</td>
@@ -240,6 +258,9 @@ export default function Pagos({ token }: { token: string }) {
                         {MOTIVO[p.motivo] || p.motivo}{p.candidatos.length ? `: ${p.candidatos.join(', ')}` : ''}
                       </td>
                       <td style={td}>
+                        {p.motivo === 'fuera_de_ventana' ? (
+                          <span style={{ color: S.dim, fontSize: 12 }}>No cuenta en esta pichanga</span>
+                        ) : (
                         <div style={{ display: 'flex', gap: 6 }}>
                           <select value={asignar[p.id] || ''} onChange={(e) => setAsignar({ ...asignar, [p.id]: e.target.value })} style={{ ...sel, minWidth: 130 }}>
                             <option value="">Jugador…</option>
@@ -250,6 +271,7 @@ export default function Pagos({ token }: { token: string }) {
                             Asignar
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   ))}

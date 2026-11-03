@@ -3,6 +3,18 @@
  *
  * matches.date es un timestamp cuyo DÍA en UTC es el día real (la app guarda
  * 00:00Z) y matches.time es texto "HH:MM" en hora de Chile.
+ *
+ * Ventana de UNA pichanga, intervalo semiabierto [convocatoria, pitazo + 5 días).
+ * No se recorta con la pichanga siguiente: el estado no cambia porque después
+ * se convoque o se cree otro partido. Si dos ventanas se pisan, el servicio
+ * asigna el pago a la más antigua que ese jugador todavía no tiene pagada
+ * y el panel marca solapa.
+ *   - desde = primer mensaje match_convocatoria; si falta, matches.created_at.
+ *     Si ese instante es posterior al pitazo (partidos importados), se acota
+ *     al pitazo.
+ *   - fin = pitazo + 5 días (exclusivo). hasta = min(fin, ahora), para mostrar.
+ * Un pago fuera de [desde, fin) no se asigna: se muestra «fuera de ventana».
+ * «Pagó tarde» sigue siendo el cierre, no el pitazo.
  */
 const TZ = 'America/Santiago';
 
@@ -42,12 +54,38 @@ export function isoSantiago(d: Date): string {
 
 export const DIAS_VENTANA = 5;
 
-/** Ventana de búsqueda: desde la hora del partido hasta +5 días (sin pasar de ahora). */
-export function ventanaPagos(matchDate: string, matchTime: string | null, ahora: Date) {
-  const desde = santiagoAUtc(matchDate.slice(0, 10), matchTime);
-  const fin = new Date(desde.getTime() + DIAS_VENTANA * 86400000);
+export interface VentanaOpts {
+  /**
+   * Instante de la convocatoria: primer mensaje match_convocatoria, o
+   * matches.created_at si no hay mensaje. null = sin dato (se usa el pitazo).
+   */
+  convocatoria?: Date | string | null;
+}
+
+function instante(v: Date | string | null | undefined): Date | null {
+  if (v == null || v === '') return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Ventana de una pichanga. [desde, fin) semiabierto: el instante pitazo+5d
+ * no entra. No mira otras pichangas. solapa lo calcula el servicio.
+ * hasta es el fin visible: min(fin, ahora).
+ */
+export function ventanaPagos(
+  matchDate: string,
+  matchTime: string | null,
+  ahora: Date,
+  opts?: VentanaOpts,
+) {
+  const inicio = santiagoAUtc(matchDate.slice(0, 10), matchTime);
+  const fin = new Date(inicio.getTime() + DIAS_VENTANA * 86400000);
+  const conv = instante(opts?.convocatoria);
+  // Posterior al pitazo (imports): no abrir la ventana después del partido.
+  const desde = conv && conv.getTime() < inicio.getTime() ? conv : inicio;
   const hasta = fin.getTime() > ahora.getTime() ? ahora : fin;
-  return { desde, hasta, cerrada: fin.getTime() <= ahora.getTime() };
+  return { desde, fin, hasta, cerrada: fin.getTime() <= ahora.getTime(), solapa: false };
 }
 
 /**

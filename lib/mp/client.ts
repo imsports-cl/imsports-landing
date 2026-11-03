@@ -60,9 +60,11 @@ async function mpGet(path: string, params: Record<string, string>, op: MpOpcione
   return res.json();
 }
 
+export type ListaPagosMp = PagoMpRaw[] & { truncado?: boolean };
+
 /** Pagos APROBADOS en la ventana (por fecha de aprobación), todas las páginas. */
-export async function buscarPagosAprobados(desdeIso: string, hastaIso: string, op: MpOpciones = {}): Promise<PagoMpRaw[]> {
-  const out: PagoMpRaw[] = [];
+export async function buscarPagosAprobados(desdeIso: string, hastaIso: string, op: MpOpciones = {}): Promise<ListaPagosMp> {
+  const out: ListaPagosMp = [];
   for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
     const offset = pagina * LIMITE_PAGINA;
     const j = await mpGet('/v1/payments/search', {
@@ -78,8 +80,10 @@ export async function buscarPagosAprobados(desdeIso: string, hastaIso: string, o
     const res: PagoMpRaw[] = Array.isArray(j?.results) ? j.results : [];
     out.push(...res);
     const total = Number(j?.paging?.total ?? 0);
-    if (res.length < LIMITE_PAGINA || offset + res.length >= total) break;
+    if (res.length < LIMITE_PAGINA || offset + res.length >= total) return out;
   }
+  // Se llenó el tope de páginas y todavía había más: los más nuevos no vinieron.
+  out.truncado = true;
   return out;
 }
 
