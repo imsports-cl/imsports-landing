@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Novedades from './Novedades';
 import Pagos from './Pagos';
 import { CONFIRMACION_MARCAR_PAGADO, textoFechasPendientes } from '../../lib/cierre/fechas';
+import { copiaReglasAdmin, type Fragmento } from './copia-reglas';
 import { createClient, type Session } from '@supabase/supabase-js';
 
 const supa = createClient(
@@ -50,6 +51,18 @@ interface Miembro { user_id: string; nombre: string }
 interface PanelData {
   fechas: string[]; ranking: RankRow[]; ultimas12_confirmacion?: ConfRow[];
   registrados: RegRow[]; lineup: Lineup; miembros: Miembro[];
+  /** Lo manda /admin/api. Apagado: los textos de ayuda quedan como en prod. */
+  sancion_hasta_pagar?: boolean;
+}
+
+function Trozos({ partes, color }: { partes: Fragmento[]; color?: string }) {
+  return (
+    <>
+      {partes.map((p, i) =>
+        p.fuerte ? <b key={i} style={color ? { color } : undefined}>{p.texto}</b> : p.texto,
+      )}
+    </>
+  );
 }
 
 /** Fecha corta legible: 2026-09-28 → "28 sep" */
@@ -290,6 +303,7 @@ export default function AdminPage() {
 
             {tab === 'titulares' && data.lineup && (() => {
               const L = data.lineup;
+              const reglas = copiaReglasAdmin(Boolean(data.sancion_hasta_pagar));
               const titulares = L.jugadores.filter((j) => j.titular);
               const banca = L.jugadores.filter((j) => !j.titular);
               const comoEntra = (j: LineupPlayer) =>
@@ -417,8 +431,7 @@ export default function AdminPage() {
                       </div>
                     )}
                     <p style={{ color: S.dim, fontSize: 12, marginBottom: 0, marginTop: 12 }}>
-                      Los que queden en banca aseguran cupo las próximas <b>4 fechas</b> (4 lunes = 28 días desde esta fecha;
-                      se agregan solos al cerrar el partido),
+                      Los que queden en banca aseguran cupo las próximas 4 fechas (se agregan solos al cerrar el partido),
                       salvo quien haya confirmado <b>después</b> de anunciados los titulares: juega si hay cupo, pero no asegura.
                       A quien ya traía cupo vigente <b>no se le corre la fecha</b>: mantiene la que tenía.
                       Si alguien avisó que no va, usa <b>“Se bajó”</b> — así no queda como banca ni asegura cupo.
@@ -453,8 +466,8 @@ export default function AdminPage() {
                   <section style={box}>
                     <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>🎟️ Cupos asegurados vigentes</h3>
                     <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
-                      Detectados automáticamente de la banca (4 fechas = 28 días desde la banca). Puedes cambiar la fecha o quitarlos.
-                      Quien debe una pichanga mantiene la fecha, pero mientras no pague su cupo se netea.
+                      Detectados automáticamente de la banca (4 fechas). Puedes cambiar la fecha o quitarlos.
+                      {reglas.cuposExtra && <> {reglas.cuposExtra}</>}
                     </p>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <tbody>
@@ -504,11 +517,7 @@ export default function AdminPage() {
                   <section style={{ ...box, marginTop: 16 }}>
                     <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>⛔ Pierden cupo esta fecha</h3>
                     <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
-                      Por no pagar a tiempo, llegar tarde o bajarse pasadas las 13:00. Quedan al final de la lista (sin puntos) y entre
-                      ellos ordena la hora de confirmación. Si hay cupo igual juegan. Llegar tarde y bajarse tarde duran
-                      solo esta fecha. <b>No pagar suma 1 fecha por pichanga y se acumulan</b>: esas fechas se cumplen igual aunque pague.
-                      Si no paga, después de cumplirlas sigue sancionado hasta que pague. <b>“Marcar pagado”</b> salda la deuda
-                      y no borra las fechas pendientes.
+                      <Trozos partes={reglas.introPierde} />
                       <br />
                       <b style={{ color: '#F6C453' }}>⚖️ Netea:</b> si el sancionado ya aseguraba cupo (MVP,
                       organizador o banca), se anulan y entra por puntaje normal.
@@ -581,8 +590,7 @@ export default function AdminPage() {
                         <li><b style={{ color: S.accent }}>🌟 MVP de la fecha pasada</b> — solo para la fecha siguiente.</li>
                         <li><b style={{ color: S.accent }}>🎩 Organizador</b> — quien creó el partido, solo esa fecha.</li>
                         <li>
-                          <b style={{ color: S.accent }}>🪑 Los que quedaron en banca</b> — aseguran las <b>4 fechas siguientes</b>
-                          (4 pichangas semanales: 28 días contados desde la fecha en que quedó en banca),
+                          <b style={{ color: S.accent }}>🪑 Los que quedaron en banca</b> — aseguran las <b>4 fechas siguientes</b>,
                           y el cupo se mantiene aunque alcancen a jugar antes. Volver a quedar en banca
                           con el cupo <b style={{ color: S.text }}>todavía vigente no corre la fecha</b>: se conserva la
                           original. Solo arranca un nuevo período si queda en banca cuando el anterior ya venció.
@@ -614,29 +622,16 @@ export default function AdminPage() {
                         <li>Lo mismo si lo bajas y después lo reincorporas desde este panel.</li>
                       </ul>
 
-                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>⛔ Pierde cupo</p>
+                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>{reglas.tituloPierde}</p>
                       <ul style={{ paddingLeft: 20, margin: '0 0 18px', color: S.dim }}>
-                        <li>⏰ Llegó tarde · 🚪 Se bajó pasadas las 13:00 → <b style={{ color: S.text }}>dura una fecha</b> (la siguiente).</li>
-                        <li>
-                          💸 No pagó → cada pichanga impaga al cierre <b style={{ color: S.text }}>suma 1 fecha de sanción y se acumulan</b>.
-                          Esas fechas se cumplen igual aunque pague. Si no paga, después de cumplirlas sigue sancionado hasta que pague.
-                          Pagar tarde no salva la fecha que ya se ganó.
-                        </li>
-                        <li>
-                          <b style={{ color: S.text }}>Plazo para pagar:</b> hasta que se cierre la pichanga. Mientras no se
-                          cierre, no es tarde; al cerrar, el que no ha pagado queda sancionado.
-                        </li>
-                        <li>La deuda se salda al conciliar el pago en Mercado Pago, o el admin la marca pagada (efectivo/transferencia). Eso no borra las fechas de sanción pendientes.</li>
-                        <li>Queda al <b style={{ color: S.text }}>final de la lista y sin puntos</b>; entre sancionados ordena la hora de confirmación.</li>
-                        <li>Si igual sobra cupo, juega: solo baja de prioridad.</li>
+                        {reglas.reglasPierde.map((item, i) => (
+                          <li key={i}><Trozos partes={item} color={S.text} /></li>
+                        ))}
                       </ul>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#F6C453' }}>⚖️ Neteo</p>
                       <p style={{ margin: '0 0 18px', color: S.dim }}>
-                        Si alguien <b style={{ color: S.text }}>asegura cupo y lo pierde</b> en la misma fecha, se anulan:
-                        entra por la regla de puntajes, conservando sus confirmaciones. Con deuda activa o fechas de sanción
-                        pendientes esto pasa en <b style={{ color: S.text }}>cada fecha mientras siga sancionado</b> y con cualquier cupo
-                        (MVP, organizador o banca); el cupo no se pierde, sigue corriendo hasta su vencimiento.
+                        <Trozos partes={reglas.neteo} color={S.text} />
                       </p>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700 }}>🚪 Bajarse</p>

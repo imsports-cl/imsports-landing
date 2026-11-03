@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fechasPendientesDeLineup, textoFechasPendientes, CONFIRMACION_MARCAR_PAGADO } from '../../lib/cierre/fechas';
+import { copiaReglasAdmin, textoPlanoCopia } from '../../app/admin/copia-reglas';
 import { mensajeCierre } from '../../lib/cierre/mensaje';
 import {
   asignarPagosADeudas,
@@ -217,13 +218,15 @@ test('una deuda de la misma fecha no mete en pierde a quien ya pagó', () => {
 
 test('los textos publicados de la sanción hasta pagar están en el panel', () => {
   const page = readFileSync(new URL('../../app/admin/page.tsx', import.meta.url), 'utf8');
+  const publicados = textoPlanoCopia(copiaReglasAdmin(true));
   assert.match(page, /deuda_no_pago: '💸 Debe una pichanga · hasta que pague'/);
   assert.match(page, /debe la del \$\{fechaCorta\(s\.fecha_deuda\)\}/);
-  assert.match(page, /suma 1 fecha por pichanga y se acumulan/);
-  assert.match(page, /se cumplen igual aunque pague/);
-  assert.match(page, /Mientras no se\s+cierre, no es tarde/);
-  assert.match(page, /4 fechas = 28 días/);
-  assert.match(page, /fechas de sanción/);
+  assert.match(page, /copiaReglasAdmin\(Boolean\(data\.sancion_hasta_pagar\)\)/);
+  assert.match(publicados, /suma 1 fecha por pichanga y se acumulan/);
+  assert.match(publicados, /se cumplen igual aunque pague/);
+  assert.match(publicados, /Mientras no se\s+cierre, no es tarde/);
+  assert.match(publicados, /fechas de sanción/);
+  assert.doesNotMatch(publicados, /28 días/);
   assert.match(page, /Marcar pagado/);
   assert.match(page, /CONFIRMACION_MARCAR_PAGADO/);
   assert.match(page, /textoFechasPendientes/);
@@ -243,6 +246,71 @@ test('los textos publicados de la sanción hasta pagar están en el panel', () =
   const client = readFileSync(new URL('../../lib/mp/client.ts', import.meta.url), 'utf8');
   assert.equal(client.includes("method: 'GET'"), true);
   assert.equal(/method:\s*'(POST|PUT|PATCH|DELETE)'/.test(client), false);
+});
+
+test('flag apagado: /admin no muestra ningún texto de la regla nueva', () => {
+  const frases = [
+    'suma 1 fecha',
+    'se acumulan',
+    'hasta que pague',
+    'Plazo para pagar',
+    'no borra las fechas',
+    'fechas de sanción',
+    'aunque pague',
+    'mientras no pague',
+    'Marcar pagado',
+    'cada fecha mientras siga sancionado',
+    'Pagar tarde no salva',
+    'Quien debe una pichanga',
+    '28 días',
+    '4 lunes',
+  ];
+  const off = copiaReglasAdmin(false);
+  const plano = textoPlanoCopia(off);
+  for (const frase of frases) assert.equal(plano.includes(frase), false, frase);
+  assert.equal(off.cuposExtra, '');
+  assert.equal(
+    off.introPierde.map((p) => p.texto).join(''),
+    'Por no pagar a tiempo o llegar tarde. Quedan al final de la lista (sin puntos) y entre ellos ordena la hora de confirmación. Si hay cupo igual juegan. Dura solo esta fecha.',
+  );
+  assert.equal(off.tituloPierde, '⛔ Pierde cupo (dura una fecha)');
+  assert.equal(
+    off.reglasPierde.map((item) => item.map((p) => p.texto).join('')).join('\n'),
+    [
+      '💸 No pagó a tiempo · ⏰ Llegó tarde · 🚪 Se bajó pasadas las 13:00.',
+      'Queda al final de la lista y sin puntos; entre sancionados ordena la hora de confirmación.',
+      'Si igual sobra cupo, juega: solo baja de prioridad.',
+    ].join('\n'),
+  );
+  assert.equal(
+    off.neteo.map((p) => p.texto).join(''),
+    'Si alguien asegura cupo y lo pierde en la misma fecha, se anulan: entra por la regla de puntajes, conservando sus confirmaciones.',
+  );
+
+  const on = textoPlanoCopia(copiaReglasAdmin(true));
+  assert.match(on, /suma 1 fecha por pichanga y se acumulan/);
+  assert.match(on, /suma 1 fecha de sanción y se acumulan/);
+  assert.match(on, /Plazo para pagar/);
+  assert.match(on, /no borra las fechas pendientes/);
+  assert.match(on, /no borra las fechas de sanción pendientes/);
+  assert.doesNotMatch(on, /28 días/);
+  assert.doesNotMatch(on, /Dura solo esta fecha/);
+
+  const page = readFileSync(new URL('../../app/admin/page.tsx', import.meta.url), 'utf8');
+  const api = readFileSync(new URL('../../app/admin/api/route.ts', import.meta.url), 'utf8');
+  assert.match(page, /copiaReglasAdmin\(Boolean\(data\.sancion_hasta_pagar\)\)/);
+  assert.match(page, /reglas\.introPierde/);
+  assert.match(page, /reglas\.tituloPierde/);
+  assert.match(page, /reglas\.reglasPierde/);
+  assert.match(page, /reglas\.neteo/);
+  assert.match(page, /reglas\.cuposExtra/);
+  assert.match(api, /sancion_hasta_pagar: sancionHastaPagarActiva\(\)/);
+  assert.match(page, /Los que queden en banca aseguran cupo las próximas 4 fechas \(se agregan solos al cerrar el partido\),/);
+  assert.match(page, /Detectados automáticamente de la banca \(4 fechas\)\. Puedes cambiar la fecha o quitarlos\./);
+  assert.match(page, /aseguran las <b>4 fechas siguientes<\/b>,/);
+  for (const frase of ['28 días', '4 lunes', '4 pichangas semanales', 'suma 1 fecha', 'Plazo para pagar', 'no borra las fechas', 'se acumulan', 'mientras no pague', 'aunque pague', 'fechas de sanción']) {
+    assert.equal(page.includes(frase), false, `page.tsx contiene «${frase}»`);
+  }
 });
 
 test('el texto de fechas pendientes distingue una y varias', () => {

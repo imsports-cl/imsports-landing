@@ -11,6 +11,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { sancionHastaPagarActiva } from '../../../lib/mp/deudas';
 import { supabase as service } from '../../../lib/supabase';
 
 // Barham + Pablo Ibáñez (Spid). Para agregar admins: sumar email y redeploy.
@@ -58,6 +59,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     ...panel.data,
+    sancion_hasta_pagar: sancionHastaPagarActiva(),
     lineup: { ...(lineup.data as any), bajados },
     miembros: miembros.data || [],
   });
