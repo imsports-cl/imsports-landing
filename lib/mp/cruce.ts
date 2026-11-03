@@ -143,6 +143,30 @@ function aliasDe(pago: PagoMp, aliases: AliasPagador[]): AliasPagador | undefine
     || aliases.find((a) => a.payer_name_norm && pago.nombres.some((n) => claveNombre(n) === a.payer_name_norm));
 }
 
+/** A quién apunta este pago, sin mirar si ese jugador ya tiene otro. */
+export function identificarPago(
+  titulares: Titular[],
+  pago: PagoMp,
+  aliases: AliasPagador[] = [],
+): { tipo: 'unico'; userId: string } | { tipo: 'ambiguo'; userIds: string[] } | { tipo: 'ninguno' } {
+  const perfiles = titulares.map(perfil);
+  const porUser = new Map(perfiles.map((p) => [p.t.user_id, p]));
+  const al = aliasDe(pago, aliases);
+  if (al) {
+    return porUser.has(al.user_id) ? { tipo: 'unico', userId: al.user_id } : { tipo: 'ninguno' };
+  }
+  let elegido: string | undefined;
+  const porEmail = perfiles.filter((p) => calzaEmail(p, pago));
+  if (porEmail.length === 1) elegido = porEmail[0].t.user_id;
+  if (!elegido) {
+    const porNombre = perfiles.filter((p) =>
+      pago.nombres.some((n) => calzaNombre(p, n)) || calzaNombreEnEmail(p, pago));
+    if (porNombre.length === 1) elegido = porNombre[0].t.user_id;
+    else if (porNombre.length > 1) return { tipo: 'ambiguo', userIds: porNombre.map((p) => p.t.user_id) };
+  }
+  return elegido ? { tipo: 'unico', userId: elegido } : { tipo: 'ninguno' };
+}
+
 const visible = (p: PagoMp, cierre: Date | string | null): PagoVisible => ({
   id: p.id, fecha: p.fecha, monto: p.monto, pagador: p.pagador,
   fecha_clt: fechaHoraClt(p.fecha), tarde: esPagoTarde(p.fecha, cierre),
@@ -155,8 +179,8 @@ export function cruzarPagos(
   nombreDe: (userId: string) => string | undefined = () => undefined,
   /** Cierre de pago (lib/mp/cierre.ts). null/omitido = pendiente: nadie paga tarde. */
   cierre: Date | string | null = null,
-  /** Pagos anteriores a la convocatoria: se muestran, no se asignan ni suman. */
-  anteriores: PagoMp[] = [],
+  /** Pagos fuera de [convocatoria, pitazo+5d): se muestran, no se asignan ni suman. */
+  fuera: PagoMp[] = [],
 ): ResultadoCruce {
   const vis = (p: PagoMp) => visible(p, cierre);
   const perfiles = titulares.map(perfil);
@@ -207,7 +231,7 @@ export function cruzarPagos(
     asignado.set(elegido.t.user_id, { ...vis(pago), via });
   }
 
-  for (const p of anteriores) {
+  for (const p of fuera) {
     sin.push({ ...vis(p), motivo: 'fuera_de_ventana', candidatos: [] });
   }
 

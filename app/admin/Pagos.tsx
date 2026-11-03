@@ -47,7 +47,7 @@ const MOTIVO: Record<string, string> = {
   ambiguo: 'Calza con más de uno',
   duplicado: 'Segundo pago del mismo jugador',
   no_titular: 'Mapeado a alguien que no es titular',
-  fuera_de_ventana: 'Fuera de ventana (anterior a la convocatoria)',
+  fuera_de_ventana: 'Fuera de ventana (no cuenta para esta pichanga)',
 };
 const VIA: Record<string, string> = { alias: 'mapeo manual', email: 'correo', nombre: 'nombre' };
 
@@ -141,7 +141,7 @@ export default function Pagos({ token }: { token: string }) {
             </p>
           {d.partido.ventana.solapa && (
             <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
-              La convocatoria de una de estas pichangas salió antes del pitazo de la anterior. Desde ese aviso los pagos se cuentan solo en la pichanga nueva. Revísalo antes de sancionar.
+              Esta ventana se solapa con otra pichanga. Un pago del tramo común se asigna a la más antigua que ese jugador todavía no tiene pagada. Revísalo antes de sancionar.
             </p>
           )}
           </div>

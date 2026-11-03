@@ -4,8 +4,8 @@
  * MercadoPago) por parámetro, así los tests corren con fakes y nunca tocan prod.
  */
 import { aPagoMp, esPagoDePichanga, type PagoMpRaw } from './pagos-mp';
-import { claveNombre, cruzarPagos, type AliasPagador, type ResultadoCruce, type Titular } from './cruce';
-import { isoSantiago, santiagoAUtc, ventanaPagos } from './tiempo';
+import { claveNombre, cruzarPagos, identificarPago, type AliasPagador, type ResultadoCruce, type Titular } from './cruce';
+import { DIAS_VENTANA, isoSantiago, santiagoAUtc, ventanaPagos } from './tiempo';
 import { normalizarEmail } from './normalizar';
 import { cierrePago, type CierrePago } from './cierre';
 
@@ -107,57 +107,112 @@ function convocatoriaAcotada(evento: string | null, createdAt: string | null | u
   return d;
 }
 
+interface VentanaLista {
+  id: string;
+  desde: number;
+  fin: number;
+  titulares: Titular[];
+}
+
+/** Ventanas que se tocan: [a,b) y [c,d) con a < d y c < b. */
+function seSolapan(a: VentanaLista, b: VentanaLista): boolean {
+  return a.desde < b.fin && b.desde < a.fin;
+}
+
 async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
-  const [eventoConv, anterior, siguiente, eventoCierre] = await Promise.all([
+  const [eventoConv, anterior, siguiente, eventoCierre, aliases, miembros] = await Promise.all([
     deps.repo.eventoConvocatoria(m),
     deps.repo.partidoAnterior(m),
     deps.repo.partidoSiguiente(m),
     deps.repo.eventoCierre(m),
+    deps.repo.aliases(m.group_id),
+    deps.repo.miembros(m.group_id),
   ]);
-  const [convAntEv, convSigEv] = await Promise.all([
-    anterior ? deps.repo.eventoConvocatoria(anterior) : Promise.resolve(null),
-    siguiente ? deps.repo.eventoConvocatoria(siguiente) : Promise.resolve(null),
-  ]);
-  // El mensaje manda. Si falta, matches.created_at. ventanaPagos acota al pitazo.
   const convocatoria = eventoConv ?? m.created_at ?? null;
-  const convocatoriaSiguiente = siguiente
-    ? convocatoriaAcotada(convSigEv, siguiente.created_at, inicioPartido(siguiente))
-    : null;
-  const v = ventanaPagos(m.date, m.time, deps.ahora(), {
-    convocatoria,
-    convocatoriaSiguiente,
-    inicioAnterior: anterior ? inicioPartido(anterior) : null,
-  });
+  const v0 = ventanaPagos(m.date, m.time, deps.ahora(), { convocatoria });
+  const vecinos = (await Promise.all([anterior, siguiente].filter((p): p is Partido => Boolean(p)).map(async (p) => {
+    const [ev, titulares] = await Promise.all([deps.repo.eventoConvocatoria(p), titularesQuePagan(deps, p)]);
+    const inicio = inicioPartido(p);
+    const desde = convocatoriaAcotada(ev, p.created_at, inicio);
+    return { id: p.id, desde: desde.getTime(), fin: inicio.getTime() + DIAS_VENTANA * 86400000, titulares };
+  }))).sort((a, b) => a.desde - b.desde || a.fin - b.fin);
+  const actual: VentanaLista = { id: m.id, desde: v0.desde.getTime(), fin: v0.fin.getTime(), titulares: tit };
+  const ventanas = [...vecinos, actual].sort((a, b) => a.fin - b.fin || a.desde - b.desde);
+  // Orden de pichanga: la más antigua es la de pitazo anterior. fin - 5d = pitazo.
+  ventanas.sort((a, b) => (a.fin - b.fin) || (a.desde - b.desde));
+  const solapa = vecinos.some((o) => seSolapan(actual, o));
+  const v = { ...v0, solapa };
   const cierre: CierrePago = cierrePago(m, eventoCierre);
-  if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null };
-
-  // Desde la convocatoria anterior, para que un pago previo a esta convocatoria
-  // llegue y se pueda mostrar como «fuera de ventana» (no se asigna).
-  let buscarDesde = v.desde;
-  if (anterior) {
-    const piso = convocatoriaAcotada(convAntEv, anterior.created_at, inicioPartido(anterior));
-    if (piso.getTime() < buscarDesde.getTime()) buscarDesde = piso;
-  }
-  if (v.hasta.getTime() <= buscarDesde.getTime()) {
-    return { v, cierre, cruce: cruzarPagos(tit, [], [], undefined, cierre.en) };
-  }
-  const raw = await deps.mp.buscarAprobados(isoSantiago(buscarDesde), isoSantiago(v.hasta));
-  const precio = m.price != null ? Number(m.price) : null;
-  const desdeMs = v.desde.getTime();
-  const hastaMs = v.hasta.getTime();
-  // [desde, hasta). El borde exacto entra en la pichanga que empieza ahí.
-  // Se comparan instantes: MP manda -04:00 y Chile está en -03:00.
-  const enVentana: ReturnType<typeof aPagoMp>[] = [];
-  const anteriores: ReturnType<typeof aPagoMp>[] = [];
-  for (const p of raw.filter((r) => esPagoDePichanga(r, precio)).map(aPagoMp)) {
-    const t = Date.parse(p.fecha);
-    if (Number.isNaN(t) || t >= hastaMs) continue;
-    if (t < desdeMs) anteriores.push(p);
-    else enVentana.push(p);
-  }
-  const [aliases, miembros] = await Promise.all([deps.repo.aliases(m.group_id), deps.repo.miembros(m.group_id)]);
   const nombres = new Map(miembros.map((x) => [x.user_id, x.nombre]));
-  return { v, cierre, cruce: cruzarPagos(tit, enVentana, aliases, (id) => nombres.get(id), cierre.en, anteriores) };
+  const sinCerteza = new Set<string>();
+  if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null, sinCerteza, nombres };
+
+  let buscarDesde = v0.desde;
+  for (const o of vecinos) {
+    if (o.desde < buscarDesde.getTime()) buscarDesde = new Date(o.desde);
+  }
+  const ahora = deps.ahora();
+  if (ahora.getTime() <= buscarDesde.getTime()) {
+    return { v, cierre, cruce: cruzarPagos(tit, [], aliases, (id) => nombres.get(id), cierre.en), sinCerteza, nombres };
+  }
+  const raw = await deps.mp.buscarAprobados(isoSantiago(buscarDesde), isoSantiago(ahora));
+  const precio = m.price != null ? Number(m.price) : null;
+  const pagos = raw.filter((r) => esPagoDePichanga(r, precio)).map(aPagoMp)
+    .sort((a, b) => Date.parse(a.fecha) - Date.parse(b.fecha) || a.id.localeCompare(b.id));
+
+  const ya = new Map<string, Set<string>>();
+  const propios: ReturnType<typeof aPagoMp>[] = [];
+  const fuera: ReturnType<typeof aPagoMp>[] = [];
+  for (const p of pagos) {
+    const t = Date.parse(p.fecha);
+    if (Number.isNaN(t)) continue;
+    const enActual = t >= actual.desde && t < actual.fin;
+    const candidatos = ventanas.filter((w) => t >= w.desde && t < w.fin);
+    let destino: string | null = null;
+    let bloqueado = false;
+    for (const w of candidatos) {
+      const idn = identificarPago(w.titulares, p, aliases);
+      if (idn.tipo === 'ambiguo') {
+        if (w.id === m.id) idn.userIds.forEach((u) => sinCerteza.add(u));
+        else if (enActual) {
+          const aqui = identificarPago(actual.titulares, p, aliases);
+          if (aqui.tipo === 'unico') sinCerteza.add(aqui.userId);
+          else if (aqui.tipo === 'ambiguo') aqui.userIds.forEach((u) => sinCerteza.add(u));
+        }
+        bloqueado = true;
+        break;
+      }
+      if (idn.tipo !== 'unico') continue;
+      const tomados = ya.get(w.id) ?? new Set<string>();
+      if (tomados.has(idn.userId)) continue;
+      tomados.add(idn.userId);
+      ya.set(w.id, tomados);
+      destino = w.id;
+      break;
+    }
+    if (!enActual) { fuera.push(p); continue; }
+    if (bloqueado) {
+      // Ambiguo en esta pichanga: se muestra y no se asigna. Si la duda es de
+      // una pichanga más antigua, aquí no se asigna y no se puede sancionar.
+      const aqui = identificarPago(actual.titulares, p, aliases);
+      if (aqui.tipo === 'ambiguo') propios.push(p);
+      else if (aqui.tipo === 'unico') sinCerteza.add(aqui.userId);
+      continue;
+    }
+    if (destino === m.id || destino === null) propios.push(p);
+    else {
+      const aqui = identificarPago(actual.titulares, p, aliases);
+      const yaAqui = ya.get(m.id);
+      // Si este jugador ya tiene pago en ESTA pichanga, el extra se fue a la
+      // siguiente con certeza: la sanción por pago tarde no se bloquea.
+      if (aqui.tipo === 'unico' && !yaAqui?.has(aqui.userId)) sinCerteza.add(aqui.userId);
+      else if (aqui.tipo === 'ambiguo') aqui.userIds.forEach((u) => sinCerteza.add(u));
+    }
+  }
+  return {
+    v, cierre, sinCerteza, nombres,
+    cruce: cruzarPagos(tit, propios, aliases, (id) => nombres.get(id), cierre.en, fuera),
+  };
 }
 
 /**
@@ -238,10 +293,14 @@ export async function sancionarNoPago(
   const jugador = tit.find((t) => t.user_id === input.user_id);
   if (!jugador) throw new ErrorPagos('no es titular de este partido (o no paga)');
   if (!deps.mp) throw new ErrorPagos('sin MercadoPago no se puede verificar el pago', 503);
-  const { cruce: c } = await cruce(deps, m, tit);
+  const { cruce: c, sinCerteza } = await cruce(deps, m, tit);
   // Solo bloquea a quien pagó A TIEMPO. «Pagó tarde» no levanta la sanción: se puede cargar.
   if (c?.titulares.find((f) => f.user_id === jugador.user_id)?.estado === 'pagado') {
     throw new ErrorPagos(`${jugador.nombre} figura con pago a tiempo`, 409);
+  }
+  // Pago en más de una ventana que no se pudo asignar con certeza a ESTA pichanga.
+  if (sinCerteza.has(jugador.user_id)) {
+    throw new ErrorPagos(`${jugador.nombre} tiene un pago en el solape de ventanas; revísalo antes de sancionar`, 409);
   }
 
   const applies_to = await fechaSancion(deps.repo, m);

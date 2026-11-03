@@ -4,17 +4,16 @@
  * matches.date es un timestamp cuyo DÍA en UTC es el día real (la app guarda
  * 00:00Z) y matches.time es texto "HH:MM" en hora de Chile.
  *
- * Ventana de pagos, intervalo semiabierto [desde, hasta): el instante del
- * borde entra en la pichanga que empieza ahí y no en la que termina.
- *   - desde = convocatoria de ESTA pichanga (primer mensaje match_convocatoria;
- *     si falta, matches.created_at). Si ese instante es posterior al pitazo
- *     (partidos importados), se acota al pitazo.
- *   - hasta = min(pitazo + 5 días, convocatoria de la pichanga siguiente, ahora).
- *     Así un pago anticipado de la siguiente no cae en la anterior, aunque la
- *     anterior todavía no haya cumplido sus 5 días.
- *   - solapa = la convocatoria de una pichanga salió ANTES del pitazo de la
- *     anterior. El panel avisa: desde ese aviso los pagos van a la nueva.
- * Un pago anterior a la convocatoria no se asigna: se muestra «fuera de ventana».
+ * Ventana de UNA pichanga, intervalo semiabierto [convocatoria, pitazo + 5 días).
+ * No se recorta con la pichanga siguiente: el estado no cambia porque después
+ * se convoque o se cree otro partido. Si dos ventanas se pisan, el servicio
+ * asigna el pago a la más antigua que ese jugador todavía no tiene pagada
+ * y el panel marca solapa.
+ *   - desde = primer mensaje match_convocatoria; si falta, matches.created_at.
+ *     Si ese instante es posterior al pitazo (partidos importados), se acota
+ *     al pitazo.
+ *   - fin = pitazo + 5 días (exclusivo). hasta = min(fin, ahora), para mostrar.
+ * Un pago fuera de [desde, fin) no se asigna: se muestra «fuera de ventana».
  * «Pagó tarde» sigue siendo el cierre, no el pitazo.
  */
 const TZ = 'America/Santiago';
@@ -61,13 +60,6 @@ export interface VentanaOpts {
    * matches.created_at si no hay mensaje. null = sin dato (se usa el pitazo).
    */
   convocatoria?: Date | string | null;
-  /**
-   * Convocatoria de la pichanga siguiente (ya acotada a su pitazo). Corta el
-   * fin de esta ventana si cae antes del pitazo + 5 días.
-   */
-  convocatoriaSiguiente?: Date | string | null;
-  /** Pitazo de la pichanga anterior. solapa si esta convocatoria es anterior. */
-  inicioAnterior?: Date | string | null;
 }
 
 function instante(v: Date | string | null | undefined): Date | null {
@@ -77,9 +69,9 @@ function instante(v: Date | string | null | undefined): Date | null {
 }
 
 /**
- * Ventana de búsqueda de pagos aprobados. [desde, hasta) semiabierto.
- * desde = convocatoria acotada al pitazo (nunca se corre hacia adelante).
- * hasta = min(pitazo + 5 días, convocatoria de la siguiente, ahora).
+ * Ventana de una pichanga. [desde, fin) semiabierto: el instante pitazo+5d
+ * no entra. No mira otras pichangas. solapa lo calcula el servicio.
+ * hasta es el fin visible: min(fin, ahora).
  */
 export function ventanaPagos(
   matchDate: string,
@@ -88,24 +80,12 @@ export function ventanaPagos(
   opts?: VentanaOpts,
 ) {
   const inicio = santiagoAUtc(matchDate.slice(0, 10), matchTime);
-  let fin = new Date(inicio.getTime() + DIAS_VENTANA * 86400000);
-
+  const fin = new Date(inicio.getTime() + DIAS_VENTANA * 86400000);
   const conv = instante(opts?.convocatoria);
   // Posterior al pitazo (imports): no abrir la ventana después del partido.
   const desde = conv && conv.getTime() < inicio.getTime() ? conv : inicio;
-
-  const convSig = instante(opts?.convocatoriaSiguiente);
-  if (convSig && convSig.getTime() < fin.getTime()) fin = convSig;
-
   const hasta = fin.getTime() > ahora.getTime() ? ahora : fin;
-  const inicioAnt = instante(opts?.inicioAnterior);
-  // La convocatoria nueva salió antes del pitazo de la anterior.
-  const solapa = Boolean(
-    (conv && inicioAnt && conv.getTime() < inicioAnt.getTime())
-    || (convSig && convSig.getTime() < inicio.getTime()),
-  );
-
-  return { desde, hasta, cerrada: fin.getTime() <= ahora.getTime(), solapa };
+  return { desde, fin, hasta, cerrada: fin.getTime() <= ahora.getTime(), solapa: false };
 }
 
 /**

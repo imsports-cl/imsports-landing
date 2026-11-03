@@ -44,22 +44,30 @@ test('semanal: el pago anticipado de B (mié 28-oct) queda pagado en B y no dupl
   const b = await estadoPagos(d, G, B.id);
   assert.equal(b.titulares[0].estado, 'pagado');
   assert.equal(b.titulares[0].pago!.id, '102');
-  assert.equal(b.partido.ventana.solapa, false);
+  // Las ventanas se solapan (A sigue hasta el sábado). Ya no se recorta A
+  // en la convocatoria de B: 101 se queda en A y 102, como A ya está pagada, va a B.
+  assert.equal(b.partido.ventana.solapa, true);
+  assert.equal(a.partido.ventana.solapa, true);
   assert.equal(a.titulares[0].estado, 'pagado');
   assert.equal(a.titulares[0].pago!.id, '101');
   assert.equal(a.sin_asignar.some((s) => s.id === '102'), false);
   assert.equal(b.sin_asignar.find((s) => s.id === '101')?.motivo, 'fuera_de_ventana');
 });
 
-test('semanal: quien paga solo B anticipado no figura pagado en A ni es sancionable en B', async () => {
+test('semanal: un solo pago en el solape va a la pichanga más antigua y no se puede sancionar la otra', async () => {
+  // Antes este caso exigía que A se recortara en la convocatoria de B, así el
+  // miércoles no entraba en A. Eso dejaba fuera los pagos de A del martes.
+  // Ahora el pago cae en las dos ventanas y, como A no tiene otro pago, se
+  // asigna a A (tarde: el cierre de A es el 27-oct 10:00). B no lo muestra
+  // como pagado, pero la sanción se rechaza: no hay certeza de que no sea de B.
   const pB = pago(103, '2026-10-28T10:00:00.000-03:00', RAFA);
   const d = armar([A, B], { [A.id]: [RAFA], [B.id]: [RAFA] }, [pB], CONV, CIERRES);
   const a = await estadoPagos(d, G, A.id);
   const b = await estadoPagos(d, G, B.id);
-  assert.equal(a.titulares[0].estado, 'no_pagado');
-  assert.equal(a.titulares[0].pago, null);
-  assert.equal(b.titulares[0].estado, 'pagado');
-  assert.equal(b.titulares[0].pago!.id, '103');
+  assert.equal(a.titulares[0].estado, 'pagado_tarde');
+  assert.equal(a.titulares[0].pago!.id, '103');
+  assert.equal(b.titulares[0].estado, 'no_pagado');
+  assert.equal(b.titulares[0].pago, null);
   await assert.rejects(
     sancionarNoPago(d, G, { match_id: B.id, user_id: RAFA.user_id, confirmar: true }, null),
     (e: any) => e.status === 409,
