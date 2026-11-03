@@ -3,7 +3,7 @@
  */
 import 'server-only';
 import { supabase as db } from '../supabase';
-import { inicioPartido, type PagosRepo, type Partido } from './servicio';
+import { inicioPartido, TITULARES_INCOMPLETO, type PagosRepo, type Partido } from './servicio';
 
 const PARTIDO = 'id, group_id, date, time, price, status, phase, created_at';
 
@@ -31,17 +31,41 @@ export const repoSupabase: PagosRepo = {
   async titularesDe(matches) {
     if (!matches.length) return {};
     const ids = matches.map((m) => m.id);
-    const [{ data: confs, error }, { data: members }] = await Promise.all([
-      db.from('match_confirmations')
-        .select('match_id, user_id, user:users(display_name, email)')
-        .in('match_id', ids).eq('status', 'confirmed').eq('is_starter', true),
-      db.from('group_members').select('user_id, nickname').eq('group_id', matches[0].group_id),
-    ]);
-    err(error);
+    const PAGINA = 1000;
+    const confs: any[] = [];
+    let total: number | null = null;
+    let members: any[] = [];
+    let desde = 0;
+    let cortado = false;
+    for (let pagina = 0; pagina < 30; pagina++) {
+      const confirmaciones = db.from('match_confirmations')
+        .select('match_id, user_id, user:users(display_name, email)', { count: 'exact' })
+        .in('match_id', ids).eq('status', 'confirmed').eq('is_starter', true)
+        .order('match_id', { ascending: true })
+        .order('user_id', { ascending: true })
+        .range(desde, desde + PAGINA - 1);
+      const miembros = pagina === 0
+        ? db.from('group_members').select('user_id, nickname').eq('group_id', matches[0].group_id)
+        : null;
+      const [confRes, memRes] = await Promise.all([
+        confirmaciones,
+        miembros ?? Promise.resolve({ data: members, error: null }),
+      ]);
+      err(confRes.error);
+      if (memRes) err((memRes as { error: any }).error);
+      if (pagina === 0) members = (memRes as { data: any[] | null }).data || [];
+      if (total == null && typeof confRes.count === 'number') total = confRes.count;
+      const page = confRes.data || [];
+      confs.push(...page);
+      if (page.length < PAGINA) break;
+      desde += PAGINA;
+      if (total != null && confs.length >= total) break;
+      if (pagina === 29) cortado = true;
+    }
     const nick = new Map((members || []).map((x: any) => [x.user_id, x.nickname as string | null]));
     const out: Record<string, { user_id: string; nombre: string; display_name: string | null; nickname: string | null; email: string | null }[]> = {};
     for (const id of ids) out[id] = [];
-    for (const c of (confs || []) as any[]) {
+    for (const c of confs) {
       const fila = {
         user_id: c.user_id,
         nombre: nick.get(c.user_id) || c.user?.display_name || 'Jugador',
@@ -50,6 +74,9 @@ export const repoSupabase: PagosRepo = {
         email: c.user?.email ?? null,
       };
       (out[c.match_id] ||= []).push(fila);
+    }
+    if (cortado || (total != null && confs.length !== total)) {
+      (out as any)[TITULARES_INCOMPLETO] = true;
     }
     return out;
   },

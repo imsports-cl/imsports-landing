@@ -120,6 +120,14 @@ function convocatoriaAcotada(evento: string | null, createdAt: string | null | u
 const CADENA_MAX = 200;
 const ANIOS_CADENA = 2;
 const LIMITE_PARTIDOS = CADENA_MAX + 1;
+/**
+ * PostgREST corta cada respuesta en 1000 filas. 60 partidos por llamada
+ * dejan una nómina de 14 titulares bajo ese tope; si una nómina es más
+ * grande, el repo igual pagina con .range().
+ */
+const TITULARES_POR_LECTURA = 60;
+/** Lo pone el repo si el conteo exacto no cierra con las filas leídas. */
+export const TITULARES_INCOMPLETO = Symbol.for('mp.titulares.incompleto');
 
 function ymdSantiago(ms: number): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -267,7 +275,14 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
     }
   }
   const otros = trozo.filter((w) => w.id !== m.id).map((w) => lista.find((p) => p.id === w.id)).filter((p): p is Partido => Boolean(p));
-  const leidos = await deps.repo.titularesDe(otros);
+  const leidos: Record<string, Titular[]> = {};
+  for (let i = 0; i < otros.length; i += TITULARES_POR_LECTURA) {
+    const parte = await deps.repo.titularesDe(otros.slice(i, i + TITULARES_POR_LECTURA));
+    if ((parte as { [TITULARES_INCOMPLETO]?: boolean })[TITULARES_INCOMPLETO]) incompleto = true;
+    for (const [id, filas] of Object.entries(parte)) {
+      if (Array.isArray(filas)) leidos[id] = filas;
+    }
+  }
   const titularesPor = new Map<string, Titular[]>([[m.id, tit]]);
   for (const [id, filas] of Object.entries(leidos)) titularesPor.set(id, paganDe(deps, filas));
   const orden = trozo.map((w) => ({ ...w, titulares: titularesPor.get(w.id) || [] }));
