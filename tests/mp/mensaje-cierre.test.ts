@@ -63,7 +63,7 @@ test('2-nov: pierde cupo, cupos vigentes y banca nueva al +28', () => {
     '9 de noviembre',
     'Talo',
     '16 de noviembre',
-    'Boris',
+    'Boris, Chalo',
     '30 de noviembre',
     'Michel, Villa, Roberto',
   ].join('\n'));
@@ -144,8 +144,7 @@ test('banca nueva suma 28 días; la que ya tenía cupo automático no', () => {
     ],
     fechaPartido: '2026-11-02',
   });
-  assert.equal(r.texto.includes('Chalo'), false);
-  assert.match(r.texto, /30 de noviembre\nMichel$/);
+  assert.match(r.texto, /16 de noviembre\nChalo\n30 de noviembre\nMichel$/);
   assert.equal(r.bloqueo, null);
 });
 

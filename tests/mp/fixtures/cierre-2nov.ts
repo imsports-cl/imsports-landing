@@ -35,7 +35,7 @@ export const CUPOS_2NOV: CupoAsegurado[] = [
   { user_id: 'u-chalo', nombre: 'Chalo', hasta: '2026-11-16' },
 ];
 
-/** Banca del 2-nov, en orden de confirmación. Chalo ya tenía cupo automático. */
+/** Banca del 2-nov, en orden de confirmación. Chalo ya tenía cupo vigente: se conserva, sin +28. */
 export const BANCA_2NOV: BancaCierre[] = [
   { user_id: 'u-chalo', nombre: 'Chalo', responded_at: '2026-11-01T12:00:00.000Z' },
   { user_id: 'u-michel', nombre: 'Michel', responded_at: '2026-11-01T13:00:00.000Z' },

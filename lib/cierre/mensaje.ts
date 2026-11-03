@@ -10,11 +10,11 @@
  * (no por partidos que todavía no existen):
  * - Quien quedó en la banca hoy (confirmado, is_starter false, y no
  *   confirmo_tarde si EXCLUIR_BANCA_CONFIRMO_TARDE) asegura hasta
- *   esta fecha + 28 días. Si ya tenía cupo que cubría hoy y no lo usó
- *   (no fue titular, o pierde cupo por no pago), no suma los 28 días y
- *   pierde el cupo anterior.
- * - El resto de cupos_asegurados.hasta, solo si es posterior a hoy y el
- *   jugador fue titular y no está en «Pierde cupo».
+ *   esta fecha + 28 días solo si no tenía un cupo todavía vigente.
+ *   Si lo tenía, no se corre la fecha: se conserva la original. El cupo
+ *   no se gasta por haber quedado en la banca.
+ * - Quien está en «Pierde cupo» (neteo) pierde el cupo asegurado, manual
+ *   o automático. Organizador y MVP de un solo partido no se tocan.
  * Cada jugador sale una vez, en la fecha más tardía. Nadie solo si los
  * datos cargaron y el conjunto está vacío.
  */
@@ -188,7 +188,6 @@ function gruposAsegura(input: {
   const pierdeId = new Set(input.titulares.filter((t) => t.estado !== 'pagado' && t.user_id).map((t) => t.user_id as string));
   const pierdeNombre = new Set(input.titulares.filter((t) => t.estado !== 'pagado').map((t) => t.nombre));
   const enPierde = (userId: string, nombre: string) => pierdeId.has(userId) || pierdeNombre.has(nombre);
-  const bancaHoy = new Set((input.banca || []).filter((b) => !(EXCLUIR_BANCA_CONFIRMO_TARDE && b.confirmo_tarde)).map((b) => b.user_id));
   const previo = new Map<string, CupoAsegurado & { hasta: string; orden: number }>();
   input.cupos.forEach((c, i) => {
     const hasta = diaCalendario(c.hasta);
@@ -212,8 +211,6 @@ function gruposAsegura(input: {
     if (enPierde(userId, c.nombre)) continue;
     const unPartido = (c.es_mvp || c.es_organizador) && c.hasta <= hoy && !c.manual;
     if (unPartido) continue;
-    const automatico = !c.manual;
-    if (automatico && c.hasta >= hoy && bancaHoy.has(userId)) continue;
     guardar(userId, c.nombre, c.hasta, c.orden);
   }
   const banca = [...(input.banca || [])]
