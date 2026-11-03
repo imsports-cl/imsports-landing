@@ -154,32 +154,6 @@ export default function Pagos({ token }: { token: string }) {
     await copiarTexto(d.mensaje_cierre);
   };
 
-  const cerrarYCopiar = async () => {
-    if (!d || d.mensaje_cierre_bloqueado || mensajeStale || busy) return;
-    // eslint-disable-next-line no-alert
-    if (!window.confirm('¿Cerrar el partido y copiar el mensaje?')) return;
-    setBusy('cerrar');
-    try {
-      const r = await fetch('/admin/api/pagos', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accion: 'cerrar_mensaje', match_id: d.partido.id }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) { alert(j.error || 'No se pudo cerrar el partido'); return; }
-      setD(j);
-      setMensajeStale(false);
-      setErr(null);
-      if (j.mensaje_cierre_bloqueado || !j.mensaje_cierre) {
-        alert(j.mensaje_cierre_aviso || 'El partido se cerró, pero el mensaje no se puede copiar.');
-        return;
-      }
-      await copiarTexto(j.mensaje_cierre);
-    } catch {
-      alert('No se pudo cerrar el partido');
-    } finally { setBusy(null); }
-  };
-
   const box: React.CSSProperties = { background: S.card, border: `1px solid ${S.border}`, borderRadius: 14, padding: 20, marginBottom: 16 };
   const th: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', color: S.dim, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: `1px solid ${S.border}` };
   const td: React.CSSProperties = { padding: '8px 10px', borderBottom: `1px solid ${S.border}`, fontSize: 14 };
@@ -266,21 +240,20 @@ export default function Pagos({ token }: { token: string }) {
         <section style={box}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontSize: 15 }}>Mensaje de cierre</h3>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" onClick={cerrarYCopiar} disabled={d.mensaje_cierre_bloqueado || mensajeStale || busy !== null}
-                style={{ ...btn(S.accent), opacity: d.mensaje_cierre_bloqueado || mensajeStale ? 0.45 : 1, cursor: d.mensaje_cierre_bloqueado || mensajeStale ? 'not-allowed' : 'pointer' }}>
-                {busy === 'cerrar' ? 'Cerrando…' : 'Cerrar y copiar mensaje'}
-              </button>
-              <button type="button" onClick={copiarMensaje} disabled={d.mensaje_cierre_bloqueado || mensajeStale}
-                style={{ ...btn(S.accent), opacity: d.mensaje_cierre_bloqueado || mensajeStale ? 0.45 : 1, cursor: d.mensaje_cierre_bloqueado || mensajeStale ? 'not-allowed' : 'pointer' }}>
-                {copiado ? 'Copiado' : 'Copiar'}
-              </button>
-            </div>
+            <button type="button" onClick={copiarMensaje} disabled={d.mensaje_cierre_bloqueado || mensajeStale}
+              style={{ ...btn(S.accent), opacity: d.mensaje_cierre_bloqueado || mensajeStale ? 0.45 : 1, cursor: d.mensaje_cierre_bloqueado || mensajeStale ? 'not-allowed' : 'pointer' }}>
+              {copiado ? 'Copiado' : 'Copiar'}
+            </button>
           </div>
           {d.sin_cierre && (
-            <p role="status" style={{ color: S.dim, fontSize: 13, margin: '0 0 12px' }}>
-              Este partido aún no está cerrado en la app: hasta que lo cierres, ningún pago cuenta como tarde.
-            </p>
+            <>
+              <p role="status" style={{ color: S.dim, fontSize: 13, margin: '0 0 8px' }}>
+                Este partido aún no está cerrado en la app: hasta que lo cierres, ningún pago cuenta como tarde.
+              </p>
+              <p style={{ color: S.dim, fontSize: 13, margin: '0 0 12px' }}>
+                Copia este mensaje y después cierra la pichanga en la app.
+              </p>
+            </>
           )}
           {(mensajeStale || d.mensaje_cierre_aviso) && (
             <p role="status" style={{ color: S.warn, fontSize: 13, margin: '0 0 12px' }}>

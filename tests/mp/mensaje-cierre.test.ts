@@ -172,6 +172,50 @@ test('cupo manual no se pierde en la banca; el impago sí lo pierde', () => {
   assert.equal(texto.includes('Villa') && texto.split('Villa').length === 2, true);
 });
 
+test('MVP en la banca con cupo que vence hoy asegura 28 días', () => {
+  const texto = textoDe({
+    titulares: [{ user_id: 'u-alan', nombre: 'Alan', estado: 'pagado' }],
+    cupos: [{ user_id: 'u-mvp', nombre: 'Nico', hasta: '2026-11-02', es_mvp: true }],
+    banca: [{ user_id: 'u-mvp', nombre: 'Nico', responded_at: '2026-11-01T10:00:00Z' }],
+    fechaPartido: '2026-11-02',
+  });
+  assert.match(texto, /30 de noviembre\nNico$/);
+  assert.equal(texto.includes('2 de noviembre'), false);
+});
+
+test('MVP sancionado o que confirmó tarde no suma 28 días', () => {
+  const base = {
+    titulares: [] as { user_id: string; nombre: string; estado: 'pagado' }[],
+    cupos: [{ user_id: 'u-mvp', nombre: 'Nico', hasta: '2026-11-02', es_mvp: true }],
+    fechaPartido: '2026-11-02',
+  };
+  const sancionado = textoDe({
+    ...base,
+    banca: [{ user_id: 'u-mvp', nombre: 'Nico', responded_at: '2026-11-01T10:00:00Z', sancionado: true }],
+  });
+  const tarde = textoDe({
+    ...base,
+    banca: [{ user_id: 'u-mvp', nombre: 'Nico', responded_at: '2026-11-01T10:00:00Z', confirmo_tarde: true }],
+  });
+  assert.match(sancionado, /Asegura cupo hasta:\nNadie$/);
+  assert.match(tarde, /Asegura cupo hasta:\nNadie$/);
+});
+
+test('banca sancionada no asegura ni con cupo previo', () => {
+  const texto = textoDe({
+    titulares: [{ user_id: 'u-alan', nombre: 'Alan', estado: 'pagado' }],
+    cupos: [{ user_id: 'u-michel', nombre: 'Michel', hasta: '2026-11-16' }],
+    banca: [
+      { user_id: 'u-michel', nombre: 'Michel', responded_at: '2026-11-01T13:00:00Z', sancionado: true },
+      { user_id: 'u-villa', nombre: 'Villa', responded_at: '2026-11-01T14:00:00Z' },
+    ],
+    fechaPartido: '2026-11-02',
+  });
+  assert.equal(texto.includes('Michel'), false);
+  assert.equal(texto.includes('16 de noviembre'), false);
+  assert.match(texto, /30 de noviembre\nVilla$/);
+});
+
 test('organizador de un partido no entra ni gana 28 días', () => {
   const texto = textoDe({
     titulares: [],

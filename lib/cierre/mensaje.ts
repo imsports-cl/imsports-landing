@@ -209,8 +209,9 @@ function gruposAsegura(input: {
     if (!ant || hasta > ant.hasta) mejor.set(userId, { nombre, hasta, orden: ant ? Math.min(ant.orden, orden) : orden });
     else if (orden < ant.orden) ant.orden = orden;
   };
+  const sancionadoHoy = new Set((input.banca || []).filter((b) => b.sancionado).map((b) => b.user_id));
   for (const [userId, c] of previo) {
-    if (enPierde(userId, c.nombre)) continue;
+    if (enPierde(userId, c.nombre) || sancionadoHoy.has(userId)) continue;
     const unPartido = (c.es_mvp || c.es_organizador) && c.hasta <= hoy && !c.manual;
     if (unPartido) continue;
     guardar(userId, c.nombre, c.hasta, c.orden);
@@ -221,7 +222,10 @@ function gruposAsegura(input: {
   banca.forEach((b, i) => {
     if (enPierde(b.user_id, b.nombre)) return;
     const tenia = previo.get(b.user_id);
-    if (tenia && tenia.hasta >= hoy) return;
+    // Un cupo que vence hoy no está vigente. El MVP en la banca arranca +28;
+    // el de organizador de un partido no.
+    const mvpVenceHoy = Boolean(tenia && tenia.es_mvp && !tenia.manual && tenia.hasta <= hoy);
+    if (tenia && tenia.hasta >= hoy && !mvpVenceHoy) return;
     guardar(b.user_id, b.nombre, sumarDias(hoy, DIAS_CUPO_BANCA), input.titulares.length + i);
   });
   const grupos = new Map<string, { nombre: string; orden: number }[]>();

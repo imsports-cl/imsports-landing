@@ -7,7 +7,6 @@
  * POST { accion: 'mapear', payment_id, user_id }      → alias pagador → jugador
  *      { accion: 'quitar_alias', alias_id }
  *      { accion: 'sancion_no_pago', match_id, user_id, confirmar: true }
- *      { accion: 'cerrar_mensaje', match_id } → match_closed (idempotente) y mensaje recalculado
  *
  * MercadoPago: solo GET /v1/payments/search y GET /v1/payments/{id}, con
  * MP_ACCESS_TOKEN (server-only, nunca NEXT_PUBLIC_). Al navegador va solo
@@ -20,7 +19,7 @@ import { buscarPagosAprobados, mpConfigurado, obtenerPago, MpError, MpNoConfigur
 import { repoSupabase } from '../../../../lib/mp/repo-supabase';
 import { ErrorPagos, estadoPagos, mapearPagador, sancionarNoPago, type Deps } from '../../../../lib/mp/servicio';
 import { mensajeDePagos } from '../../../../lib/cierre/datos';
-import { asegurarCierrePartido } from '../../../../lib/cierre/registrar';
+import { exigirMatchId } from '../../../../lib/mp/ids';
 
 const ADMINS = ['bmadain@gmail.com', 'pablo.ibanezd@gmail.com'];
 // Titulares que no pagan la cancha (Barham organiza y es admin).
@@ -71,7 +70,9 @@ export async function GET(req: NextRequest) {
   if (deny) return deny;
   try {
     // Cada GET consulta MercadoPago en el momento: nunca cachear (botón «Revisar pagos»)
-    const estado = await estadoPagos(deps(), GRUPO_ID, req.nextUrl.searchParams.get('match_id'));
+    const matchId = req.nextUrl.searchParams.get('match_id');
+    if (matchId) exigirMatchId(matchId);
+    const estado = await estadoPagos(deps(), GRUPO_ID, matchId);
     const mensaje = await mensajeDePagos(estado, GRUPO_ID);
     return NextResponse.json({ ...estado, ...mensaje }, { headers: NO_STORE });
   } catch (e) { return fallo(e); }
@@ -92,17 +93,12 @@ export async function POST(req: NextRequest) {
         if (!body.alias_id) throw new ErrorPagos('faltan datos');
         await d.repo.borrarAlias(GRUPO_ID, String(body.alias_id));
         return NextResponse.json({ ok: true });
-      case 'sancion_no_pago':
-        return NextResponse.json(await sancionarNoPago(d, GRUPO_ID, {
-          match_id: String(body.match_id || ''), user_id: String(body.user_id || ''), confirmar: body.confirmar,
-        }, adminId));
-      case 'cerrar_mensaje': {
+      case 'sancion_no_pago': {
         const matchId = String(body.match_id || '');
-        if (!matchId) throw new ErrorPagos('faltan datos');
-        await asegurarCierrePartido(GRUPO_ID, matchId);
-        const estado = await estadoPagos(d, GRUPO_ID, matchId);
-        const mensaje = await mensajeDePagos(estado, GRUPO_ID);
-        return NextResponse.json({ ...estado, ...mensaje }, { headers: NO_STORE });
+        exigirMatchId(matchId);
+        return NextResponse.json(await sancionarNoPago(d, GRUPO_ID, {
+          match_id: matchId, user_id: String(body.user_id || ''), confirmar: body.confirmar,
+        }, adminId));
       }
       default:
         throw new ErrorPagos('acción desconocida');
