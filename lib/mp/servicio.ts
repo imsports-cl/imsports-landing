@@ -5,7 +5,7 @@
  */
 import { aPagoMp, esPagoDePichanga, type PagoMpRaw } from './pagos-mp';
 import { claveNombre, cruzarPagos, type AliasPagador, type ResultadoCruce, type Titular } from './cruce';
-import { DIAS_VENTANA, isoSantiago, santiagoAUtc, ventanaPagos } from './tiempo';
+import { isoSantiago, santiagoAUtc, ventanaPagos } from './tiempo';
 import { normalizarEmail } from './normalizar';
 import { cierrePago, type CierrePago } from './cierre';
 
@@ -38,6 +38,8 @@ export interface PagosRepo {
   eventoConvocatoria(match: Partido): Promise<string | null>;
   /** Partido anterior no cancelado del mismo grupo (por hora de inicio), o null. */
   partidoAnterior(match: Partido): Promise<Partido | null>;
+  /** Partido siguiente no cancelado del mismo grupo (por hora de inicio), o null. */
+  partidoSiguiente(match: Partido): Promise<Partido | null>;
   sanciones(groupId: string, appliesTo: string): Promise<Sancion[]>;
   /** INSERT simple (sin upsert). Debe lanzar { code: '23505' } si ya existe. */
   insertarSancion(s: Sancion & { group_id: string; created_by: string | null }): Promise<void>;
@@ -96,36 +98,66 @@ async function titularesQuePagan(deps: Deps, m: Partido): Promise<Titular[]> {
   return (await deps.repo.titulares(m)).filter((t) => !no.has(normalizarEmail(t.email)));
 }
 
+/** Convocatoria acotada al pitazo: mensaje, si no created_at, si no el pitazo. */
+function convocatoriaAcotada(evento: string | null, createdAt: string | null | undefined, inicio: Date): Date {
+  const raw = evento ?? createdAt ?? null;
+  if (!raw) return inicio;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime()) || d.getTime() >= inicio.getTime()) return inicio;
+  return d;
+}
+
 async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
-  const [eventoConv, anterior, eventoCierre] = await Promise.all([
+  const [eventoConv, anterior, siguiente, eventoCierre] = await Promise.all([
     deps.repo.eventoConvocatoria(m),
     deps.repo.partidoAnterior(m),
+    deps.repo.partidoSiguiente(m),
     deps.repo.eventoCierre(m),
+  ]);
+  const [convAntEv, convSigEv] = await Promise.all([
+    anterior ? deps.repo.eventoConvocatoria(anterior) : Promise.resolve(null),
+    siguiente ? deps.repo.eventoConvocatoria(siguiente) : Promise.resolve(null),
   ]);
   // El mensaje manda. Si falta, matches.created_at. ventanaPagos acota al pitazo.
   const convocatoria = eventoConv ?? m.created_at ?? null;
-  const finAnterior = anterior
-    ? new Date(inicioPartido(anterior).getTime() + DIAS_VENTANA * 86400000)
+  const convocatoriaSiguiente = siguiente
+    ? convocatoriaAcotada(convSigEv, siguiente.created_at, inicioPartido(siguiente))
     : null;
-  const v = ventanaPagos(m.date, m.time, deps.ahora(), { convocatoria, finAnterior });
+  const v = ventanaPagos(m.date, m.time, deps.ahora(), {
+    convocatoria,
+    convocatoriaSiguiente,
+    inicioAnterior: anterior ? inicioPartido(anterior) : null,
+  });
   const cierre: CierrePago = cierrePago(m, eventoCierre);
   if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null };
-  if (v.hasta.getTime() <= v.desde.getTime()) {
+
+  // Desde la convocatoria anterior, para que un pago previo a esta convocatoria
+  // llegue y se pueda mostrar como «fuera de ventana» (no se asigna).
+  let buscarDesde = v.desde;
+  if (anterior) {
+    const piso = convocatoriaAcotada(convAntEv, anterior.created_at, inicioPartido(anterior));
+    if (piso.getTime() < buscarDesde.getTime()) buscarDesde = piso;
+  }
+  if (v.hasta.getTime() <= buscarDesde.getTime()) {
     return { v, cierre, cruce: cruzarPagos(tit, [], [], undefined, cierre.en) };
   }
-  const raw = await deps.mp.buscarAprobados(isoSantiago(v.desde), isoSantiago(v.hasta));
+  const raw = await deps.mp.buscarAprobados(isoSantiago(buscarDesde), isoSantiago(v.hasta));
   const precio = m.price != null ? Number(m.price) : null;
   const desdeMs = v.desde.getTime();
   const hastaMs = v.hasta.getTime();
-  // MP busca por rango, pero el fake (y un borde de offset) pueden traer de más:
-  // se compara el instante, no el texto (-04:00 de MP vs -03:00 de Chile).
-  const pagos = raw.filter((r) => esPagoDePichanga(r, precio)).map(aPagoMp).filter((p) => {
+  // [desde, hasta). El borde exacto entra en la pichanga que empieza ahí.
+  // Se comparan instantes: MP manda -04:00 y Chile está en -03:00.
+  const enVentana: ReturnType<typeof aPagoMp>[] = [];
+  const anteriores: ReturnType<typeof aPagoMp>[] = [];
+  for (const p of raw.filter((r) => esPagoDePichanga(r, precio)).map(aPagoMp)) {
     const t = Date.parse(p.fecha);
-    return !Number.isNaN(t) && t >= desdeMs && t <= hastaMs;
-  });
+    if (Number.isNaN(t) || t >= hastaMs) continue;
+    if (t < desdeMs) anteriores.push(p);
+    else enVentana.push(p);
+  }
   const [aliases, miembros] = await Promise.all([deps.repo.aliases(m.group_id), deps.repo.miembros(m.group_id)]);
   const nombres = new Map(miembros.map((x) => [x.user_id, x.nombre]));
-  return { v, cierre, cruce: cruzarPagos(tit, pagos, aliases, (id) => nombres.get(id), cierre.en) };
+  return { v, cierre, cruce: cruzarPagos(tit, enVentana, aliases, (id) => nombres.get(id), cierre.en, anteriores) };
 }
 
 /**

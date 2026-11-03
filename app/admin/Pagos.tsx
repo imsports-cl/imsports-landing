@@ -47,6 +47,7 @@ const MOTIVO: Record<string, string> = {
   ambiguo: 'Calza con más de uno',
   duplicado: 'Segundo pago del mismo jugador',
   no_titular: 'Mapeado a alguien que no es titular',
+  fuera_de_ventana: 'Fuera de ventana (anterior a la convocatoria)',
 };
 const VIA: Record<string, string> = { alias: 'mapeo manual', email: 'correo', nombre: 'nombre' };
 
@@ -140,7 +141,7 @@ export default function Pagos({ token }: { token: string }) {
             </p>
           {d.partido.ventana.solapa && (
             <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
-              Esta ventana se solapa con la pichanga anterior: un pago entre el inicio de este partido y el fin de la ventana anterior puede aparecer en las dos. Revísalo antes de sancionar.
+              La convocatoria de una de estas pichangas salió antes del pitazo de la anterior. Desde ese aviso los pagos se cuentan solo en la pichanga nueva. Revísalo antes de sancionar.
             </p>
           )}
           </div>
@@ -245,6 +246,9 @@ export default function Pagos({ token }: { token: string }) {
                         {MOTIVO[p.motivo] || p.motivo}{p.candidatos.length ? `: ${p.candidatos.join(', ')}` : ''}
                       </td>
                       <td style={td}>
+                        {p.motivo === 'fuera_de_ventana' ? (
+                          <span style={{ color: S.dim, fontSize: 12 }}>No cuenta en esta pichanga</span>
+                        ) : (
                         <div style={{ display: 'flex', gap: 6 }}>
                           <select value={asignar[p.id] || ''} onChange={(e) => setAsignar({ ...asignar, [p.id]: e.target.value })} style={{ ...sel, minWidth: 130 }}>
                             <option value="">Jugador…</option>
@@ -255,6 +259,7 @@ export default function Pagos({ token }: { token: string }) {
                             Asignar
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   ))}

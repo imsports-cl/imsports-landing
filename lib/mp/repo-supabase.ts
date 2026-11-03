@@ -94,6 +94,16 @@ export const repoSupabase: PagosRepo = {
       .filter((p) => inicioPartido(p).getTime() < inicio)
       .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
   },
+  async partidoSiguiente(m) {
+    const { data, error } = await db.from('matches').select(PARTIDO)
+      .eq('group_id', m.group_id).gte('date', m.date).neq('id', m.id).neq('status', 'cancelled')
+      .order('date', { ascending: true }).limit(15);
+    err(error);
+    const inicio = inicioPartido(m).getTime();
+    return ((data || []) as Partido[])
+      .filter((p) => inicioPartido(p).getTime() > inicio)
+      .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime())[0] ?? null;
+  },
   async sanciones(groupId, appliesTo) {
     const { data, error } = await db.from('player_sanctions')
       .select('user_id, applies_to, reason, note').eq('group_id', groupId).eq('applies_to', appliesTo);

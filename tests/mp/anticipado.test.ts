@@ -5,9 +5,10 @@
  *
  * Inicio de ventana: primer mensaje match_convocatoria; si falta,
  * matches.created_at, acotado al inicio del partido si es posterior.
- * Solape: desde = max(esa convocatoria, fin de la ventana del partido
- * anterior no cancelado), sin pasar del pitazo. Si la anterior sigue
- * abierta al pitazo, solapa = true (el panel lo avisa).
+ * La ventana de N es [convocatoria N, min(pitazo N + 5 días, convocatoria N+1)).
+ * El borde exacto entra solo en la que empieza. solapa solo si la convocatoria
+ * de N es anterior al pitazo de N-1. Un pago anterior a la convocatoria se
+ * muestra como fuera_de_ventana y no se asigna.
  */
 import './_guard';
 import { test } from 'node:test';
@@ -108,18 +109,33 @@ test('ventana: sin mensaje se usa created_at; si es posterior al pitazo se acota
   assert.equal(isoSantiago(importado.desde), '2026-11-02T20:00:00.000-03:00');
 });
 
-test('ventana: el fin de la anterior corre el inicio, con tope en el pitazo', () => {
-  const finSabado = new Date(santiagoAUtc('2026-10-26', '20:00').getTime() + DIAS_VENTANA * 86400000);
-  assert.equal(isoSantiago(finSabado), '2026-10-31T20:00:00.000-03:00');
-  // Convocatoria dentro de la ventana anterior, pero el fin cae antes del pitazo.
-  const v = ventanaPagos('2026-11-02', '20:00', AHORA, { convocatoria: '2026-10-30T12:00:00.000Z', finAnterior: finSabado });
-  assert.equal(v.desde.toISOString(), finSabado.toISOString());
-  assert.equal(v.solapa, false);
-  // Dos partidos en la semana: la anterior sigue abierta al pitazo → no pasar del inicio, y avisar.
-  const finLargo = new Date(santiagoAUtc('2026-11-02', '20:00').getTime() + DIAS_VENTANA * 86400000);
-  const cerca = ventanaPagos('2026-11-05', '20:00', AHORA, { convocatoria: '2026-11-04T12:00:00.000Z', finAnterior: finLargo });
-  assert.equal(cerca.desde.toISOString(), '2026-11-05T23:00:00.000Z');
-  assert.equal(cerca.solapa, true);
+test('ventana: el fin de la anterior se corta en la convocatoria siguiente; el inicio no se corre', () => {
+  const convB = '2026-10-27T12:00:00.000Z'; // mar 27-oct 09:00 CLT
+  const a = ventanaPagos('2026-10-26', '20:00', AHORA, {
+    convocatoria: '2026-10-20T12:00:00.000Z',
+    convocatoriaSiguiente: convB,
+  });
+  assert.equal(a.desde.toISOString(), '2026-10-20T12:00:00.000Z');
+  assert.equal(a.hasta.toISOString(), convB);
+  assert.equal(a.cerrada, true);
+  assert.equal(a.solapa, false);
+  const b = ventanaPagos('2026-11-02', '20:00', AHORA, {
+    convocatoria: convB,
+    inicioAnterior: santiagoAUtc('2026-10-26', '20:00'),
+  });
+  assert.equal(b.desde.toISOString(), convB);
+  assert.equal(b.solapa, false);
+  // Convocatoria de B anterior al pitazo de A → aviso, sin mover el inicio de B.
+  const antesDelPitazo = '2026-10-26T12:00:00.000Z';
+  const solapa = ventanaPagos('2026-11-02', '20:00', AHORA, {
+    convocatoria: antesDelPitazo,
+    inicioAnterior: santiagoAUtc('2026-10-26', '20:00'),
+  });
+  assert.equal(solapa.desde.toISOString(), antesDelPitazo);
+  assert.equal(solapa.solapa, true);
+  const finNatural = new Date(santiagoAUtc('2026-10-26', '20:00').getTime() + DIAS_VENTANA * 86400000);
+  assert.equal(isoSantiago(finNatural), '2026-10-31T20:00:00.000-03:00');
+  assert.ok(Date.parse(convB) < finNatural.getTime());
 });
 
 test('borde de huso: el instante exacto de la convocatoria (-04:00 de MP = -03:00 de Chile) entra; 1 ms antes no', () => {
@@ -139,11 +155,12 @@ test('borde de huso: el instante exacto de la convocatoria (-04:00 de MP = -03:0
     ],
   });
   return estadoPagos(d, G, M2.id).then((r) => {
-    assert.equal(llamadas[0], `search ${isoSantiago(conv)} ${isoSantiago(AHORA)}`);
+    assert.equal(llamadas[0], `search ${isoSantiago(new Date(M19.created_at!))} ${isoSantiago(AHORA)}`);
     const alan = r.titulares.find((f) => f.user_id === 'u-alan')!;
     assert.equal(alan.estado, 'pagado');
     assert.equal(alan.pago!.id, '2011');
-    assert.equal(JSON.stringify(r).includes('2010'), false);
+    assert.equal(r.sin_asignar.find((s) => s.id === '2010')?.motivo, 'fuera_de_ventana');
+    assert.equal(r.resumen!.recaudado, 5000);
     sinCorreoNiToken(r);
   });
 });
@@ -158,7 +175,7 @@ test('pago entre la convocatoria y el pitazo queda pagado (a tiempo) por correo;
     pagos: [PAGO_ANTES, PAGO_ALAN],
   });
   const r = await estadoPagos(d, G, M2.id);
-  assert.equal(llamadas[0], `search ${isoSantiago(new Date(CONV))} ${isoSantiago(AHORA)}`);
+  assert.equal(llamadas[0], `search ${isoSantiago(new Date(M19.created_at!))} ${isoSantiago(AHORA)}`);
   assert.equal(r.partido.ventana.desde, CONV);
   assert.equal(r.partido.ventana.solapa, false);
   assert.equal(r.partido.cierre.fuente, 'pendiente');
@@ -167,7 +184,8 @@ test('pago entre la convocatoria y el pitazo queda pagado (a tiempo) por correo;
   assert.equal(alan.pago!.tarde, false);
   assert.equal(alan.pago!.via, 'email');
   assert.equal(alan.pago!.id, '2001');
-  assert.equal(JSON.stringify(r).includes('2000'), false, 'el pago anterior a la convocatoria no entra');
+  assert.equal(r.sin_asignar.find((s) => s.id === '2000')?.motivo, 'fuera_de_ventana');
+  assert.equal(r.resumen!.recaudado, 5000, 'el pago anterior a la convocatoria no suma');
   assert.equal(r.titulares.find((f) => f.user_id === 'u-rafa')!.estado, 'no_pagado');
   sinCorreoNiToken(r);
 });
@@ -208,7 +226,8 @@ test('created_at posterior al pitazo no adelanta ni atrasa: el pago de antes del
   assert.equal(llamadas[0].startsWith('search 2026-11-02T20:00:00.000-03:00 '), true);
   assert.equal(r.titulares[0].estado, 'pagado');
   assert.equal(r.titulares[0].pago!.id, '2030');
-  assert.equal(JSON.stringify(r).includes('2001'), false);
+  assert.equal(r.sin_asignar.find((s) => s.id === '2001')?.motivo, 'fuera_de_ventana');
+  assert.equal(r.resumen!.recaudado, 5000);
 });
 
 test('un partido cancelado no recorta la ventana de la siguiente', async () => {
@@ -226,55 +245,77 @@ test('un partido cancelado no recorta la ventana de la siguiente', async () => {
 
 // ---- solape entre dos pichangas del mismo grupo ----
 
-test('dos pichangas seguidas: un pago queda en una sola (la ventana nueva parte cuando termina la anterior)', async () => {
-  const ma = partido('m-a', '2026-10-26T00:00:00+00:00', { created_at: '2026-10-25T12:00:00.000Z' });
-  const mb = partido('m-b', '2026-11-02T00:00:00+00:00', { created_at: '2026-10-30T12:00:00.000Z' });
-  const convA = '2026-10-25T12:00:00.000Z';
-  const convB = '2026-10-30T12:00:00.000Z'; // domingo dentro de la ventana del lunes anterior
-  const finA = new Date(santiagoAUtc(ma.date, ma.time).getTime() + DIAS_VENTANA * 86400000);
-  const enA = pago(3001, '2026-10-30T17:00:00.000-04:00', { id: '9200', email: 'nico.soto@example.test', first_name: 'NICO', last_name: 'SOTO' });
-  const enB = pago(3002, '2026-11-01T09:00:00.000-04:00', { id: '9200', email: 'nico.soto@example.test', first_name: 'NICO', last_name: 'SOTO' });
+test('dos pichangas seguidas: el pago anticipado de la segunda no entra en la primera', async () => {
+  const ma = partido('m-a', '2026-10-26T00:00:00+00:00', { status: 'completed', phase: 'closed', created_at: '2026-10-20T12:00:00.000Z' });
+  const mb = partido('m-b', '2026-11-02T00:00:00+00:00', { created_at: '2026-10-27T12:00:00.000Z' });
+  const convA = '2026-10-20T12:00:00.000Z';
+  const convB = '2026-10-27T12:00:00.000Z'; // mar 27-oct 09:00, dentro de los 5 días de A
+  const enA = pago(3001, '2026-10-26T18:00:00.000-03:00', { id: '9200', email: 'nico.soto@example.test', first_name: 'NICO', last_name: 'SOTO' });
+  const anticipadoB = pago(3002, '2026-10-28T10:00:00.000-03:00', { id: '9200', email: 'nico.soto@example.test', first_name: 'NICO', last_name: 'SOTO' });
   const { d } = armar({
     partidos: [ma, mb],
     titulares: { [ma.id]: [NICO], [mb.id]: [NICO] },
     convocatorias: { [ma.id]: convA, [mb.id]: convB },
-    pagos: [enA, enB],
+    cierres: { [ma.id]: '2026-10-27T13:00:00.000Z' },
+    pagos: [enA, anticipadoB],
     ahora: new Date('2026-11-03T16:00:00.000Z'),
   });
   const a = await estadoPagos(d, G, ma.id);
   const b = await estadoPagos(d, G, mb.id);
+  assert.equal(a.partido.ventana.hasta, convB);
+  assert.equal(b.partido.ventana.desde, convB);
   assert.equal(a.partido.ventana.solapa, false);
   assert.equal(b.partido.ventana.solapa, false);
-  assert.equal(b.partido.ventana.desde, finA.toISOString());
+  assert.equal(a.titulares[0].estado, 'pagado');
   assert.equal(a.titulares[0].pago!.id, '3001');
-  assert.equal(b.titulares[0].pago!.id, '3002');
+  assert.equal(a.sin_asignar.some((s) => s.id === '3002'), false);
   assert.equal(b.titulares[0].estado, 'pagado');
-  assert.equal(JSON.stringify(a).includes('3002'), false);
-  assert.equal(JSON.stringify(b).includes('3001'), false);
+  assert.equal(b.titulares[0].pago!.id, '3002');
+  assert.equal(b.titulares[0].pago!.tarde, false);
+  assert.equal(b.sin_asignar.find((s) => s.id === '3001')?.motivo, 'fuera_de_ventana');
 });
 
-test('dos pichangas en la misma semana: el tramo que pasa del pitazo se avisa (solapa) y no se recorta', async () => {
-  const ma = partido('m-lun', '2026-11-02T00:00:00+00:00');
-  const mb = partido('m-jue', '2026-11-05T00:00:00+00:00');
-  const compartido = pago(3010, '2026-11-05T20:00:00.000-04:00', {
-    id: '9201', email: 'nico.soto@example.test', first_name: 'NICO', last_name: 'SOTO',
-  });
+test('borde semiabierto: el instante de la convocatoria siguiente queda solo en la nueva', async () => {
+  const ma = partido('m-a', '2026-10-26T00:00:00+00:00', { created_at: '2026-10-20T12:00:00.000Z' });
+  const mb = partido('m-b', '2026-11-02T00:00:00+00:00', { created_at: '2026-10-27T12:00:00.000Z' });
+  const convB = '2026-10-27T12:00:00.000Z';
+  const justo = pago(3011, '2026-10-27T09:00:00.000-03:00', { id: '9202', email: 'nico.soto@example.test', first_name: 'NICO', last_name: 'SOTO' });
+  const unMs = pago(3010, '2026-10-27T08:59:59.999-03:00', { id: '9202', email: 'nico.soto@example.test', first_name: 'NICO', last_name: 'SOTO' });
+  assert.equal(Date.parse(justo.date_approved!), Date.parse(convB));
+  assert.ok(Date.parse(unMs.date_approved!) < Date.parse(convB));
   const { d } = armar({
     partidos: [ma, mb],
     titulares: { [ma.id]: [NICO], [mb.id]: [NICO] },
-    convocatorias: { [ma.id]: '2026-11-01T12:00:00.000Z', [mb.id]: '2026-11-04T12:00:00.000Z' },
-    pagos: [compartido],
-    ahora: new Date('2026-11-08T16:00:00.000Z'),
+    convocatorias: { [ma.id]: '2026-10-20T12:00:00.000Z', [mb.id]: convB },
+    pagos: [unMs, justo],
   });
   const a = await estadoPagos(d, G, ma.id);
   const b = await estadoPagos(d, G, mb.id);
-  assert.equal(a.partido.ventana.solapa, false);
-  assert.equal(b.partido.ventana.solapa, true, 'el panel marca el solape');
-  assert.equal(b.partido.ventana.desde, santiagoAUtc('2026-11-05', '20:00').toISOString());
-  assert.equal(a.titulares[0].estado, 'pagado');
-  assert.equal(b.titulares[0].estado, 'pagado');
   assert.equal(a.titulares[0].pago!.id, '3010');
-  assert.equal(b.titulares[0].pago!.id, '3010');
+  assert.equal(b.titulares[0].pago!.id, '3011');
+  assert.equal(a.titulares[0].pago && b.titulares[0].pago && a.titulares[0].pago.id === b.titulares[0].pago.id, false);
+});
+
+test('solapa: la convocatoria salió antes del pitazo anterior y el aviso queda', async () => {
+  const ma = partido('m-lun', '2026-11-02T00:00:00+00:00', { created_at: '2026-10-20T12:00:00.000Z' });
+  const mb = partido('m-sig', '2026-11-09T00:00:00+00:00', { created_at: '2026-11-02T12:00:00.000Z' });
+  const convB = '2026-11-02T12:00:00.000Z'; // antes del pitazo del 2-nov 20:00 CLT
+  const enB = pago(3012, '2026-11-02T15:00:00.000-03:00', { id: '9203', email: 'nico.soto@example.test', first_name: 'NICO', last_name: 'SOTO' });
+  const { d } = armar({
+    partidos: [ma, mb],
+    titulares: { [ma.id]: [NICO], [mb.id]: [NICO] },
+    convocatorias: { [ma.id]: '2026-10-20T12:00:00.000Z', [mb.id]: convB },
+    pagos: [enB],
+    ahora: new Date('2026-11-03T16:00:00.000Z'),
+  });
+  const a = await estadoPagos(d, G, ma.id);
+  const b = await estadoPagos(d, G, mb.id);
+  assert.equal(a.partido.ventana.solapa, true);
+  assert.equal(b.partido.ventana.solapa, true);
+  assert.equal(b.partido.ventana.desde, convB);
+  assert.equal(a.titulares[0].estado, 'no_pagado');
+  assert.equal(b.titulares[0].estado, 'pagado');
+  assert.equal(b.titulares[0].pago!.id, '3012');
 });
 
 // ---- montos ajenos y recaudado ----

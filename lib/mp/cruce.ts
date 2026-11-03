@@ -32,7 +32,7 @@ export interface AliasPagador {
 }
 
 export type Via = 'alias' | 'email' | 'nombre';
-export type MotivoSinAsignar = 'sin_coincidencia' | 'ambiguo' | 'duplicado' | 'no_titular';
+export type MotivoSinAsignar = 'sin_coincidencia' | 'ambiguo' | 'duplicado' | 'no_titular' | 'fuera_de_ventana';
 
 export interface PagoVisible {
   id: string; fecha: string; monto: number; pagador: string;
@@ -155,6 +155,8 @@ export function cruzarPagos(
   nombreDe: (userId: string) => string | undefined = () => undefined,
   /** Cierre de pago (lib/mp/cierre.ts). null/omitido = pendiente: nadie paga tarde. */
   cierre: Date | string | null = null,
+  /** Pagos anteriores a la convocatoria: se muestran, no se asignan ni suman. */
+  anteriores: PagoMp[] = [],
 ): ResultadoCruce {
   const vis = (p: PagoMp) => visible(p, cierre);
   const perfiles = titulares.map(perfil);
@@ -203,6 +205,10 @@ export function cruzarPagos(
       continue;
     }
     asignado.set(elegido.t.user_id, { ...vis(pago), via });
+  }
+
+  for (const p of anteriores) {
+    sin.push({ ...vis(p), motivo: 'fuera_de_ventana', candidatos: [] });
   }
 
   const filas: FilaTitular[] = titulares

@@ -25,6 +25,12 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
         .filter((p) => p.group_id === m.group_id && p.id !== m.id && p.status !== 'cancelled' && inicioPartido(p).getTime() < inicio)
         .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
     },
+    async partidoSiguiente(m) {
+      const inicio = inicioPartido(m).getTime();
+      return init.partidos
+        .filter((p) => p.group_id === m.group_id && p.id !== m.id && p.status !== 'cancelled' && inicioPartido(p).getTime() > inicio)
+        .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime())[0] ?? null;
+    },
     async sanciones(g, f) { return sanciones.filter((s) => s.group_id === g && s.applies_to === f); },
     async insertarSancion(s) {
       if (sanciones.some((x) => x.group_id === s.group_id && x.user_id === s.user_id && x.applies_to === s.applies_to)) {
