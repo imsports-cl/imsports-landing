@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fechaMensaje, mensajeCierre, mensajeCierreBloqueado, type CupoAsegurado } from '../../lib/cierre/mensaje';
-import { TITULARES_2NOV } from './fixtures/cierre-2nov';
+import { CUPOS_2NOV, TITULARES_2NOV } from './fixtures/cierre-2nov';
 
 const FUTUROS = [
   { fecha: '2026-10-05' },
@@ -45,16 +45,23 @@ test('formato: pierde cupo y asegura, agrupado por la última fecha', () => {
   ].join('\n'));
 });
 
-test('2-nov: pierde cupo en el orden del panel', () => {
+test('2-nov sin pichangas futuras: hasta directo, y el que no pagó no asegura', () => {
   const texto = mensajeCierre({
     titulares: TITULARES_2NOV,
-    cupos: [],
+    cupos: CUPOS_2NOV,
     futuros: [],
     fechaPartido: '2026-11-02',
   });
-  assert.match(texto, /^Pierde cupo por no pago:\nChino, Chipi, Esteban, Gonzalo\n/);
-  assert.equal(texto.includes('Alan'), false);
-  assert.equal(texto.includes('Thomas'), false);
+  assert.equal(texto, [
+    'Pierde cupo por no pago:',
+    'Chino, Chipi, Esteban, Gonzalo',
+    '',
+    'Asegura cupo hasta:',
+    '9 de noviembre',
+    'Talo',
+    '16 de noviembre',
+    'Boris, Chalo',
+  ].join('\n'));
 });
 
 test('nadie impago: la línea es Nadie y el encabezado queda', () => {
@@ -64,18 +71,23 @@ test('nadie impago: la línea es Nadie y el encabezado queda', () => {
     futuros: FUTUROS,
     fechaPartido: '2026-11-02',
   });
-  assert.match(texto, /^Pierde cupo por no pago:\nNadie\n/);
+  assert.equal(texto, [
+    'Pierde cupo por no pago:',
+    'Nadie',
+    '',
+    'Asegura cupo hasta:',
+    'Nadie',
+  ].join('\n'));
 });
 
-test('sin pichangas futuras: solo el encabezado de asegura', () => {
+test('sin pichangas futuras: se usa la fecha hasta', () => {
   const texto = mensajeCierre({
     titulares: [],
     cupos: [{ user_id: 'u-benja', nombre: 'Benja', hasta: '2026-12-01' }],
     futuros: [],
     fechaPartido: '2026-11-02',
   });
-  assert.equal(texto.endsWith('Asegura cupo hasta:'), true);
-  assert.equal(texto.includes('Benja'), false);
+  assert.equal(texto.endsWith('Asegura cupo hasta:\n1 de diciembre\nBenja'), true);
 });
 
 test('23:30 CLT sigue en el día de Chile; matches.date 00:00Z no se corre', () => {

@@ -6,13 +6,14 @@
  * a tiempo (`pagado`). «Pagó tarde» tampoco cuenta: pagar después del cierre
  * no levanta la sanción, igual que en el panel.
  *
- * «Asegura cupo hasta» agrupa por la última pichanga futura cubierta por el
- * cupo que ya registra el sistema (admin_lineup → cupos_asegurados.hasta:
- * banca automática de 28 días, guaranteed_spots.until_date, o el máximo de
- * ambos). Quien solo asegura la fecha que se está cerrando no aparece.
- * Cada jugador sale una vez, bajo esa última fecha. El orden de los nombres
- * es el de la tabla de titulares; quien no está en esa tabla sigue el orden
- * en que vino el cupo.
+ * «Asegura cupo hasta» usa el `hasta` de admin_lineup → cupos_asegurados
+ * (banca automática de 28 días, guaranteed_spots.until_date, o el máximo).
+ * Solo entran fechas estrictamente posteriores a la pichanga que se cierra.
+ * Si hay una pichanga futura no cancelada en una fecha ≤ hasta, el jugador
+ * queda en la última de esas. Si no hay ninguna creada, se usa el `hasta`
+ * tal cual («9 de noviembre»). Quien pierde cupo por no pago no asegura.
+ * Cada jugador sale una vez. El orden de los nombres es el de la tabla de
+ * titulares; quien no está en esa tabla sigue el orden en que vino el cupo.
  */
 
 export type EstadoPagoCierre = 'pagado' | 'pagado_tarde' | 'no_pagado';
@@ -71,9 +72,9 @@ export function mensajeCierre(input: {
     '',
     'Asegura cupo hasta:',
   ];
-  for (const g of gruposAsegura(input)) {
-    lineas.push(fechaMensaje(g.fecha), g.nombres.join(', '));
-  }
+  const grupos = gruposAsegura(input);
+  if (!grupos.length) lineas.push('Nadie');
+  else for (const g of grupos) lineas.push(fechaMensaje(g.fecha), g.nombres.join(', '));
   return lineas.join('\n');
 }
 
@@ -85,8 +86,11 @@ function gruposAsegura(input: {
 }): { fecha: string; nombres: string[] }[] {
   const hoy = diaCalendario(input.fechaPartido);
   const futuros = [...new Set(input.futuros.map((f) => diaCalendario(f.fecha)).filter((f) => f > hoy))].sort();
+  const pierdeId = new Set(input.titulares.filter((t) => t.estado !== 'pagado' && t.user_id).map((t) => t.user_id as string));
+  const pierdeNombre = new Set(input.titulares.filter((t) => t.estado !== 'pagado').map((t) => t.nombre));
   const mejor = new Map<string, { nombre: string; hasta: string; orden: number }>();
   input.cupos.forEach((c, i) => {
+    if (pierdeId.has(c.user_id) || pierdeNombre.has(c.nombre)) return;
     const hasta = diaCalendario(c.hasta);
     const idx = input.titulares.findIndex((t) => t.user_id && t.user_id === c.user_id);
     const orden = idx >= 0 ? idx : input.titulares.length + i;
@@ -96,9 +100,10 @@ function gruposAsegura(input: {
   });
   const grupos = new Map<string, { nombre: string; orden: number }[]>();
   for (const p of mejor.values()) {
+    if (p.hasta <= hoy) continue;
     let fecha = '';
     for (const f of futuros) if (f <= p.hasta) fecha = f;
-    if (!fecha) continue;
+    if (!fecha) fecha = p.hasta;
     const lista = grupos.get(fecha) ?? [];
     lista.push({ nombre: p.nombre, orden: p.orden });
     grupos.set(fecha, lista);
