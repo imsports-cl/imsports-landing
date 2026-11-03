@@ -116,6 +116,7 @@ export async function POST(req: NextRequest) {
         }, adminId));
       }
       case 'saldar_deuda': {
+        // Salda player_debts. No toca player_sanctions ni fechas_pendientes: esas fechas ya ganadas se cumplen igual.
         if (!sancionHastaPagarActiva()) return NextResponse.json({ ok: true, omitido: true });
         const userId = String(body.user_id || '');
         if (!userId) throw new ErrorPagos('faltan datos');

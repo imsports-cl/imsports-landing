@@ -2,6 +2,7 @@ import './_guard';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fechasPendientesDeLineup, textoFechasPendientes, CONFIRMACION_MARCAR_PAGADO } from '../../lib/cierre/fechas';
 import { mensajeCierre } from '../../lib/cierre/mensaje';
 import {
   asignarPagosADeudas,
@@ -218,17 +219,105 @@ test('los textos publicados de la sanción hasta pagar están en el panel', () =
   const page = readFileSync(new URL('../../app/admin/page.tsx', import.meta.url), 'utf8');
   assert.match(page, /deuda_no_pago: '💸 Debe una pichanga · hasta que pague'/);
   assert.match(page, /debe la del \$\{fechaCorta\(s\.fecha_deuda\)\}/);
-  assert.match(page, /no pagar dura hasta que pague/);
+  assert.match(page, /suma 1 fecha por pichanga y se acumulan/);
+  assert.match(page, /se cumplen igual aunque pague/);
   assert.match(page, /Mientras no se\s+cierre, no es tarde/);
   assert.match(page, /4 fechas = 28 días/);
-  assert.match(page, /cada fecha hasta que pague/);
+  assert.match(page, /fechas de sanción/);
   assert.match(page, /Marcar pagado/);
+  assert.match(page, /CONFIRMACION_MARCAR_PAGADO/);
+  assert.match(page, /textoFechasPendientes/);
   const pagos = readFileSync(new URL('../../app/admin/Pagos.tsx', import.meta.url), 'utf8');
   assert.match(pagos, /Conciliar deudas/);
   assert.match(pagos, /Marcar pagado/);
   assert.match(pagos, /debe la del/);
   assert.match(pagos, /sancion_hasta_pagar/);
+  assert.match(pagos, /textoFechasPendientes/);
+  assert.match(pagos, /CONFIRMACION_MARCAR_PAGADO/);
+  assert.match(CONFIRMACION_MARCAR_PAGADO, /no se borran/);
+  assert.match(CONFIRMACION_MARCAR_PAGADO, /se cumplen igual aunque pague/);
+  const route = readFileSync(new URL('../../app/admin/api/pagos/route.ts', import.meta.url), 'utf8');
+  const saldar = route.slice(route.indexOf("case 'saldar_deuda'"), route.indexOf("case 'conciliar_deudas'"));
+  assert.match(saldar, /saldarDeuda/);
+  assert.equal(/from\('player_sanctions'\)|\.delete\(/.test(saldar), false);
   const client = readFileSync(new URL('../../lib/mp/client.ts', import.meta.url), 'utf8');
   assert.equal(client.includes("method: 'GET'"), true);
   assert.equal(/method:\s*'(POST|PUT|PATCH|DELETE)'/.test(client), false);
+});
+
+test('el texto de fechas pendientes distingue una y varias', () => {
+  assert.equal(textoFechasPendientes(1), '1 fecha de sanción pendiente');
+  assert.equal(textoFechasPendientes(3), '3 fechas de sanción pendientes');
+});
+
+test('admin_lineup: fechas_pendientes por jugador, ignora cero y junta sanciones', () => {
+  const lista = fechasPendientesDeLineup({
+    jugadores: [
+      { user_id: 'u-boris', nombre: 'Boris', fechas_pendientes: 2 },
+      { user_id: 'u-talo', nombre: 'Talo', fechas_pendientes: 0 },
+      { user_id: 'u-alan', nombre: 'Alan' },
+    ],
+    sanciones: [
+      { user_id: 'u-boris', nombre: 'Boris', fechas_pendientes: 1 },
+      { user_id: 'u-chalo', nombre: 'Chalo', fechas_pendientes: '2' },
+    ],
+  });
+  assert.deepEqual(lista.sort((a, b) => a.user_id.localeCompare(b.user_id)), [
+    { user_id: 'u-boris', nombre: 'Boris', fechas: 2 },
+    { user_id: 'u-chalo', nombre: 'Chalo', fechas: 2 },
+  ]);
+  assert.deepEqual(fechasPendientesDeLineup(null), []);
+  assert.deepEqual(fechasPendientesDeLineup({ jugadores: [] }), []);
+});
+
+test('flag apagado: fechas pendientes no cambian el golden del 2-nov', () => {
+  const cupos = CUPOS_2NOV.map((c) => ({ ...c }));
+  const antes = JSON.stringify(cupos);
+  const off = mensajeCierre({
+    titulares: TITULARES_2NOV,
+    cupos,
+    banca: BANCA_2NOV,
+    fechaPartido: '2026-11-02',
+    fechasPendientes: [{ user_id: 'u-boris', nombre: 'Boris', fechas: 2 }],
+    sancionHastaPagar: false,
+  });
+  assert.equal(off.texto, GOLDEN_2NOV);
+  assert.equal(JSON.stringify(cupos), antes);
+});
+
+test('con el flag, deuda activa o fechas pendientes entran en pierde y se netean sin borrar el cupo', () => {
+  const cupos = CUPOS_2NOV.map((c) => ({ ...c }));
+  const antes = JSON.stringify(cupos);
+  const on = mensajeCierre({
+    titulares: TITULARES_2NOV,
+    cupos,
+    banca: BANCA_2NOV,
+    fechaPartido: '2026-11-02',
+    deudas: [{ user_id: 'u-talo', nombre: 'Talo', fecha: '2026-10-26' }],
+    fechasPendientes: [
+      { user_id: 'u-boris', nombre: 'Boris', fechas: 2 },
+      { user_id: 'u-talo', nombre: 'Talo', fechas: 1 },
+    ],
+    sancionHastaPagar: true,
+  });
+  assert.match(on.texto, /^Pierde cupo por no pago \(hasta que pague\):\nChino, Chipi, Esteban, Gonzalo, Talo, Boris\n/);
+  assert.equal(on.texto.includes('9 de noviembre'), false);
+  assert.match(on.texto, /16 de noviembre\nChalo\n/);
+  assert.equal(on.texto.split('Boris').length - 1, 1);
+  assert.equal(on.texto.split('Talo').length - 1, 1);
+  assert.equal(JSON.stringify(cupos), antes);
+  assert.equal(cupos.find((c) => c.user_id === 'u-boris')!.hasta, '2026-11-16');
+  assert.equal(cupos.find((c) => c.user_id === 'u-talo')!.hasta, '2026-11-09');
+});
+
+test('quien ya pagó y todavía tiene fechas pendientes sigue en pierde', () => {
+  const on = mensajeCierre({
+    titulares: [{ user_id: 'u-boris', nombre: 'Boris', estado: 'pagado' }],
+    cupos: [{ user_id: 'u-boris', nombre: 'Boris', hasta: '2026-11-16' }],
+    fechaPartido: '2026-11-02',
+    fechasPendientes: [{ user_id: 'u-boris', nombre: 'Boris', fechas: 1 }],
+    sancionHastaPagar: true,
+  });
+  assert.match(on.texto, /Pierde cupo por no pago \(hasta que pague\):\nBoris\n/);
+  assert.equal(on.texto.includes('16 de noviembre'), false);
 });

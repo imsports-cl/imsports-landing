@@ -8,6 +8,7 @@ import 'server-only';
 import { supabase } from '../supabase';
 import { sinCierrePago } from '../mp/cierre';
 import { santiagoAUtc } from '../mp/tiempo';
+import { fechasPendientesDeLineup, type FechasPendientes } from './fechas';
 import {
   mensajeCierre,
   type BancaCierre,
@@ -28,6 +29,7 @@ export async function mensajeDePagos(
 ) {
   const cupos: CupoAsegurado[] = [];
   const banca: BancaCierre[] = [];
+  let fechasPendientes: FechasPendientes[] = [];
   let cuposDisponibles = true;
   try {
     const [lineup, confs, partido, members, sanciones] = await Promise.all([
@@ -48,6 +50,7 @@ export async function mensajeDePagos(
       cuposDisponibles = false;
       console.error('[admin/pagos] cupos', lineup.error?.code || confs.error?.code || partido.error?.code || sanciones.error?.code || 'error');
     } else {
+      fechasPendientes = fechasPendientesDeLineup(lineup.data);
       const rows = ((lineup.data as { cupos_asegurados?: { user_id?: string; nombre?: string; hasta?: string; manual?: boolean; es_mvp?: boolean; es_organizador?: boolean }[] } | null)?.cupos_asegurados) || [];
       for (const r of rows) {
         if (!r.user_id || !r.hasta) continue;
@@ -95,6 +98,7 @@ export async function mensajeDePagos(
     partidoEmpezo,
     cuposDisponibles,
     deudas: extra?.deudas,
+    fechasPendientes: extra?.sancionHastaPagar ? fechasPendientes : [],
     sancionHastaPagar: extra?.sancionHastaPagar,
   });
   return {
@@ -103,5 +107,6 @@ export async function mensajeDePagos(
     mensaje_cierre_aviso: listo.aviso,
     bloqueo: listo.bloqueo,
     sin_cierre: sinCierrePago(estado.partido.cierre),
+    fechas_pendientes: extra?.sancionHastaPagar ? fechasPendientes : [],
   };
 }

@@ -20,6 +20,7 @@
  */
 
 import { rechazoSancionNoPago } from '../mp/servicio';
+import type { FechasPendientes } from './fechas';
 
 export type EstadoPagoCierre = 'pagado' | 'pagado_tarde' | 'no_pagado';
 
@@ -107,6 +108,11 @@ export function mensajeCierre(input: {
   banca?: BancaCierre[];
   /** Deudas activas de pichangas anteriores. Solo cuentan con sancionHastaPagar. */
   deudas?: { user_id: string; nombre: string; fecha: string }[];
+  /**
+   * Fechas de sanción ya ganadas (admin_lineup.fechas_pendientes).
+   * Cuentan aunque la deuda ya esté saldada. Solo con sancionHastaPagar.
+   */
+  fechasPendientes?: FechasPendientes[];
   sancionHastaPagar?: boolean;
   futuros?: FechaFutura[];
   /** YYYY-MM-DD de la pichanga que se cierra. */
@@ -128,6 +134,10 @@ export function mensajeCierre(input: {
   for (const d of [...deudas].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.nombre.localeCompare(b.nombre, 'es'))) {
     if (sancionables.some((t) => t.user_id === d.user_id)) continue;
     sancionables.push({ user_id: d.user_id, nombre: d.nombre, estado: 'no_pagado' });
+  }
+  for (const f of fechasQueCuentan(input)) {
+    if (sancionables.some((t) => t.user_id === f.user_id)) continue;
+    sancionables.push({ user_id: f.user_id, nombre: f.nombre, estado: 'no_pagado' });
   }
   const pagosConfiables = configurado && !historialIncompleto && !mpIncompleto && partidoEmpezo;
   const hayDuda = input.titulares.some((t) => t.estado !== 'pagado' && !sancionable(t, { configurado, historialIncompleto, partidoEmpezo }));
@@ -152,6 +162,14 @@ function deudasAnteriores(input: {
   if (!input.sancionHastaPagar) return [];
   const hoy = diaCalendario(input.fechaPartido);
   return (input.deudas || []).filter((d) => d.fecha && diaCalendario(d.fecha) < hoy);
+}
+
+/** Fechas ya ganadas, de menor a mayor nombre. El flag apagado no las mira. */
+function fechasQueCuentan(input: { fechasPendientes?: FechasPendientes[]; sancionHastaPagar?: boolean }) {
+  if (!input.sancionHastaPagar) return [];
+  return [...(input.fechasPendientes || [])]
+    .filter((f) => f.user_id && f.fechas > 0)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es') || a.user_id.localeCompare(b.user_id));
 }
 
 function sancionable(t: TitularCierre, ctx: { configurado: boolean; historialIncompleto: boolean; partidoEmpezo: boolean }): boolean {
@@ -205,13 +223,16 @@ function gruposAsegura(input: {
   banca?: BancaCierre[];
   fechaPartido: string;
   deudas?: { user_id: string; nombre: string; fecha: string }[];
+  fechasPendientes?: FechasPendientes[];
   sancionHastaPagar?: boolean;
 }): { fecha: string; nombres: string[] }[] {
   const hoy = diaCalendario(input.fechaPartido);
   const pierdeId = new Set(input.titulares.filter((t) => t.estado !== 'pagado' && t.user_id).map((t) => t.user_id as string));
   const pierdeNombre = new Set(input.titulares.filter((t) => t.estado !== 'pagado').map((t) => t.nombre));
   const deudaId = new Set(deudasAnteriores(input).map((d) => d.user_id));
-  const enPierde = (userId: string, nombre: string) => pierdeId.has(userId) || pierdeNombre.has(nombre) || deudaId.has(userId);
+  const fechasId = new Set(fechasQueCuentan(input).map((f) => f.user_id));
+  const enPierde = (userId: string, nombre: string) =>
+    pierdeId.has(userId) || pierdeNombre.has(nombre) || deudaId.has(userId) || fechasId.has(userId);
   const previo = new Map<string, CupoAsegurado & { hasta: string; orden: number }>();
   input.cupos.forEach((c, i) => {
     const hasta = diaCalendario(c.hasta);

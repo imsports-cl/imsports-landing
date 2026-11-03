@@ -7,6 +7,7 @@
  * la sanción) · ❌ no pagó. Esta pestaña nunca quita ni perdona sanciones.
  */
 import { useEffect, useRef, useState } from 'react';
+import { CONFIRMACION_MARCAR_PAGADO, textoFechasPendientes } from '../../lib/cierre/fechas';
 import { DIAS_VENTANA, horaClt } from '../../lib/mp/tiempo';
 
 const S = {
@@ -37,6 +38,7 @@ interface Datos {
   /** 041. Apagado: no hay deudas en la respuesta. */
   sancion_hasta_pagar?: boolean;
   deudas?: { id: string; user_id: string; fecha: string; nombre: string; status: string }[];
+  fechas_pendientes?: { user_id: string; nombre: string; fechas: number }[];
   alias: { id: string; jugador: string; pagador: string }[];
   miembros: { user_id: string; nombre: string }[];
 }
@@ -154,7 +156,7 @@ export default function Pagos({ token }: { token: string }) {
 
   const marcarPagado = async (userId: string) => {
     // eslint-disable-next-line no-alert
-    if (!window.confirm('¿Marcar la deuda como pagada? Desde la próxima fecha deja de perder cupo.')) return;
+    if (!window.confirm(CONFIRMACION_MARCAR_PAGADO)) return;
     await post({ accion: 'saldar_deuda', user_id: userId }, `deuda-${userId}`);
   };
 
@@ -302,11 +304,14 @@ export default function Pagos({ token }: { token: string }) {
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
-                {(d.deudas || []).map((deuda) => (
+                {(d.deudas || []).map((deuda) => {
+                  const pendientes = (d.fechas_pendientes || []).find((f) => f.user_id === deuda.user_id)?.fechas ?? 0;
+                  return (
                   <tr key={deuda.id}>
                     <td style={{ ...td, fontWeight: 700 }}>{deuda.nombre}</td>
                     <td style={{ ...td, color: S.dim, fontSize: 13 }}>
                       💸 Debe una pichanga · hasta que pague · debe la del {fechaCorta(deuda.fecha)}
+                      {pendientes > 0 && <> · {textoFechasPendientes(pendientes)}</>}
                     </td>
                     <td style={{ ...td, textAlign: 'right' }}>
                       <button type="button" onClick={() => marcarPagado(deuda.user_id)} disabled={busy !== null}
@@ -315,7 +320,8 @@ export default function Pagos({ token }: { token: string }) {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
