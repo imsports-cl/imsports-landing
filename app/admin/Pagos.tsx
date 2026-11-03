@@ -29,6 +29,8 @@ interface Datos {
   titulares: Fila[];
   sin_asignar: SinAsignar[];
   resumen: { titulares: number; pagados: number; pagados_tarde?: number; no_pagados: number; sin_asignar: number; recaudado: number } | null;
+  mensaje_cierre?: string;
+  mensaje_cierre_bloqueado?: boolean;
   alias: { id: string; jugador: string; pagador: string }[];
   miembros: { user_id: string; nombre: string }[];
 }
@@ -59,6 +61,8 @@ export default function Pagos({ token }: { token: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [asignar, setAsignar] = useState<Record<string, string>>({});
+  const [copiado, setCopiado] = useState(false);
+  const mensajeRef = useRef<HTMLTextAreaElement>(null);
 
   const [revisando, setRevisando] = useState(false);
 
@@ -77,6 +81,7 @@ export default function Pagos({ token }: { token: string }) {
       if (mio !== reqId.current) return;
       if (!r.ok) { setErr(j.error || `No se pudieron cargar los pagos (${r.status})`); return; }
       setD(j);
+      setCopiado(false);
       if (!id) setMatchId(j.partido.id);
     } catch {
       if (mio !== reqId.current) return;
@@ -117,6 +122,22 @@ export default function Pagos({ token }: { token: string }) {
     if (!window.confirm(msg)) return;
     const j = await post({ accion: 'sancion_no_pago', match_id: d.partido.id, user_id: f.user_id, confirmar: true }, f.user_id);
     if (j?.ya_existia) alert(`${f.nombre} ya tenía la sanción para el ${fechaCorta(j.applies_to)}.`);
+  };
+
+  const copiarMensaje = async () => {
+    if (!d?.mensaje_cierre || d.mensaje_cierre_bloqueado) return;
+    const texto = d.mensaje_cierre;
+    try {
+      await navigator.clipboard.writeText(texto);
+    } catch {
+      const el = mensajeRef.current;
+      if (!el) return;
+      el.focus();
+      el.select();
+      document.execCommand('copy');
+    }
+    setCopiado(true);
+    window.setTimeout(() => setCopiado(false), 2000);
   };
 
   const box: React.CSSProperties = { background: S.card, border: `1px solid ${S.border}`, borderRadius: 14, padding: 20, marginBottom: 16 };
@@ -200,6 +221,26 @@ export default function Pagos({ token }: { token: string }) {
         )}
         {err && <p role="alert" style={{ color: S.red, fontSize: 13, margin: '8px 0 0' }}>{err}</p>}
       </section>
+
+      {d.mensaje_cierre != null && (
+        <section style={box}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>Mensaje de cierre</h3>
+            <button type="button" onClick={copiarMensaje} disabled={d.mensaje_cierre_bloqueado}
+              style={{ ...btn(S.accent), opacity: d.mensaje_cierre_bloqueado ? 0.45 : 1, cursor: d.mensaje_cierre_bloqueado ? 'not-allowed' : 'pointer' }}>
+              {copiado ? 'Copiado' : 'Copiar'}
+            </button>
+          </div>
+          {d.mensaje_cierre_bloqueado && (
+            <p role="status" style={{ color: S.warn, fontSize: 13, margin: '0 0 12px' }}>
+              Historial incompleto: no uses este mensaje para sancionar
+            </p>
+          )}
+          <textarea ref={mensajeRef} readOnly value={d.mensaje_cierre} aria-label="Mensaje de cierre"
+            rows={Math.min(18, d.mensaje_cierre.split('\n').length + 1)}
+            style={{ width: '100%', boxSizing: 'border-box', background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: 12, font: 'inherit', fontSize: 14, lineHeight: 1.45, resize: 'vertical', whiteSpace: 'pre' }} />
+        </section>
+      )}
 
       <section style={box}>
         <h3 style={{ margin: '0 0 12px', fontSize: 15, color: S.accent }}>🟢 TITULARES ({d.titulares.length})</h3>

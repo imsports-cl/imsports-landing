@@ -18,6 +18,7 @@ import { supabase as service } from '../../../../lib/supabase';
 import { buscarPagosAprobados, mpConfigurado, obtenerPago, MpError, MpNoConfigurado } from '../../../../lib/mp/client';
 import { repoSupabase } from '../../../../lib/mp/repo-supabase';
 import { ErrorPagos, estadoPagos, mapearPagador, sancionarNoPago, type Deps } from '../../../../lib/mp/servicio';
+import { mensajeDePagos } from '../../../../lib/cierre/datos';
 
 const ADMINS = ['bmadain@gmail.com', 'pablo.ibanezd@gmail.com'];
 // Titulares que no pagan la cancha (Barham organiza y es admin).
@@ -68,7 +69,9 @@ export async function GET(req: NextRequest) {
   if (deny) return deny;
   try {
     // Cada GET consulta MercadoPago en el momento: nunca cachear (botón «Revisar pagos»)
-    return NextResponse.json(await estadoPagos(deps(), GRUPO_ID, req.nextUrl.searchParams.get('match_id')), { headers: NO_STORE });
+    const estado = await estadoPagos(deps(), GRUPO_ID, req.nextUrl.searchParams.get('match_id'));
+    const mensaje = await mensajeDePagos(estado, GRUPO_ID);
+    return NextResponse.json({ ...estado, ...mensaje }, { headers: NO_STORE });
   } catch (e) { return fallo(e); }
 }
 
