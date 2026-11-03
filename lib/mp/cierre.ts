@@ -44,6 +44,11 @@ export function cierrePago(
   return { en: null, fuente: 'pendiente' };
 }
 
+/** No hay mensaje match_closed: ningún pago cuenta como tarde. */
+export function sinCierrePago(cierre: { en?: string | null; fuente?: string } | null | undefined): boolean {
+  return !cierre?.en || cierre.fuente !== 'match_closed';
+}
+
 /** ¿El pago llegó después del cierre? Estrictamente después; sin cierre → no. */
 export function esPagoTarde(fechaPago: string, cierre: Date | string | null | undefined): boolean {
   if (!cierre) return false;

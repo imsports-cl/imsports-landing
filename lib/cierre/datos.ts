@@ -6,6 +6,7 @@
  */
 import 'server-only';
 import { supabase } from '../supabase';
+import { sinCierrePago } from '../mp/cierre';
 import { santiagoAUtc } from '../mp/tiempo';
 import {
   mensajeCierre,
@@ -19,7 +20,7 @@ export async function mensajeDePagos(
     configurado: boolean;
     historial_incompleto?: boolean;
     mp_incompleto?: boolean;
-    partido: { id: string; fecha: string; hora: string | null };
+    partido: { id: string; fecha: string; hora: string | null; cierre?: { en?: string | null; fuente?: string } | null };
     titulares: TitularCierre[];
   },
   groupId: string,
@@ -93,5 +94,6 @@ export async function mensajeDePagos(
     mensaje_cierre_bloqueado: listo.bloqueado,
     mensaje_cierre_aviso: listo.aviso,
     bloqueo: listo.bloqueo,
+    sin_cierre: sinCierrePago(estado.partido.cierre),
   };
 }

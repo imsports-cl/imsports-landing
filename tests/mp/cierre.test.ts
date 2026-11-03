@@ -5,7 +5,7 @@
 import './_guard';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cierrePago, esPagoTarde, fechaHoraClt } from '../../lib/mp/cierre';
+import { cierrePago, esPagoTarde, fechaHoraClt, sinCierrePago } from '../../lib/mp/cierre';
 import { cruzarPagos } from '../../lib/mp/cruce';
 import { aPagoMp, esPagoDePichanga, type PagoMpRaw } from '../../lib/mp/pagos-mp';
 import { estadoPagos, sancionarNoPago, type Deps } from '../../lib/mp/servicio';
@@ -29,6 +29,12 @@ test('cierre: el primer mensaje match_closed del partido', () => {
 test('cierre: partido sin cerrar → pendiente (nadie paga tarde todavía)', () => {
   assert.deepEqual(cierrePago(MATCH, null), { en: null, fuente: 'pendiente' });
   assert.equal(esPagoTarde('2026-10-25T12:00:00Z', null), false);
+});
+
+test('sin mensaje de cierre marca el aviso y no es un bloqueo', () => {
+  assert.equal(sinCierrePago(null), true);
+  assert.equal(sinCierrePago({ en: null, fuente: 'pendiente' }), true);
+  assert.equal(sinCierrePago({ en: '2026-10-20T01:00:00.000Z', fuente: 'match_closed' }), false);
 });
 
 test('sin mensaje de cierre, un pago después del pitazo es pagado', () => {

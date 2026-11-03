@@ -33,6 +33,7 @@ interface Datos {
   mensaje_cierre_bloqueado?: boolean;
   mensaje_cierre_aviso?: string | null;
   bloqueo?: 'historial_incompleto' | 'mp_no_configurado' | 'mp_incompleto' | 'cupos_no_disponibles' | 'sin_certeza' | null;
+  sin_cierre?: boolean;
   alias: { id: string; jugador: string; pagador: string }[];
   miembros: { user_id: string; nombre: string }[];
 }
@@ -240,6 +241,11 @@ export default function Pagos({ token }: { token: string }) {
               {copiado ? 'Copiado' : 'Copiar'}
             </button>
           </div>
+          {d.sin_cierre && (
+            <p role="status" style={{ color: S.dim, fontSize: 13, margin: '0 0 12px' }}>
+              Este partido aún no está cerrado en la app: hasta que lo cierres, ningún pago cuenta como tarde.
+            </p>
+          )}
           {(mensajeStale || d.mensaje_cierre_aviso) && (
             <p role="status" style={{ color: S.warn, fontSize: 13, margin: '0 0 12px' }}>
               {mensajeStale ? 'No se pudo actualizar: no uses este mensaje para sancionar' : d.mensaje_cierre_aviso}
