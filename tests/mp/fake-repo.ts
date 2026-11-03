@@ -25,6 +25,19 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
         .filter((p) => p.group_id === m.group_id && p.id !== m.id && p.status !== 'cancelled' && inicioPartido(p).getTime() < inicio)
         .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
     },
+    async partidosActivos(g) {
+      return init.partidos.filter((p) => p.group_id === g && p.status !== 'cancelled')
+        .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime());
+    },
+    async convocatorias(g) {
+      const out: Record<string, string> = {};
+      for (const p of init.partidos) {
+        if (p.group_id !== g) continue;
+        const c = init.convocatorias?.[p.id];
+        if (c) out[p.id] = c;
+      }
+      return out;
+    },
     async partidoSiguiente(m) {
       const inicio = inicioPartido(m).getTime();
       return init.partidos

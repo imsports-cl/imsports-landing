@@ -137,7 +137,7 @@ test('borde de huso: el instante exacto de la convocatoria (-04:00 de MP = -03:0
     ],
   });
   return estadoPagos(d, G, M2.id).then((r) => {
-    assert.equal(llamadas[0], `search ${isoSantiago(new Date(M19.created_at!))} ${isoSantiago(AHORA)}`);
+    assert.equal(llamadas[0], `search ${isoSantiago(conv)} ${isoSantiago(AHORA)}`);
     const alan = r.titulares.find((f) => f.user_id === 'u-alan')!;
     assert.equal(alan.estado, 'pagado');
     assert.equal(alan.pago!.id, '2011');
@@ -157,7 +157,7 @@ test('pago entre la convocatoria y el pitazo queda pagado (a tiempo) por correo;
     pagos: [PAGO_ANTES, PAGO_ALAN],
   });
   const r = await estadoPagos(d, G, M2.id);
-  assert.equal(llamadas[0], `search ${isoSantiago(new Date(M19.created_at!))} ${isoSantiago(AHORA)}`);
+  assert.equal(llamadas[0], `search ${isoSantiago(new Date(CONV))} ${isoSantiago(AHORA)}`);
   assert.equal(r.partido.ventana.desde, CONV);
   assert.equal(r.partido.ventana.solapa, false);
   assert.equal(r.partido.cierre.fuente, 'pendiente');

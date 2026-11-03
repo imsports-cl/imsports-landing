@@ -14,7 +14,7 @@ const S = {
 };
 
 interface PagoV { id: string; fecha: string; fecha_clt?: string; tarde?: boolean; monto: number; pagador: string; via?: string }
-interface Fila { user_id: string; nombre: string; estado: 'pagado' | 'pagado_tarde' | 'no_pagado'; pago: PagoV | null; sancion: string | null }
+interface Fila { user_id: string; nombre: string; estado: 'pagado' | 'pagado_tarde' | 'no_pagado'; pago: PagoV | null; sancion: string | null; solape?: boolean }
 interface Cierre { en: string | null; fuente: 'match_closed' | 'inicio_partido' | 'pendiente' }
 interface SinAsignar extends PagoV { motivo: string; candidatos: string[] }
 interface Datos {
@@ -204,7 +204,7 @@ export default function Pagos({ token }: { token: string }) {
                     {!d.configurado ? <span style={{ color: S.dim }}>—</span>
                       : f.estado === 'pagado' ? <>✅ Pagó <span style={{ color: S.dim }}>· {f.pago?.pagador} · por {VIA[f.pago?.via || ''] || f.pago?.via}</span></>
                       : f.estado === 'pagado_tarde' ? <>🕓 Pagó tarde <span style={{ color: S.dim }}>· {fechaPago(f.pago!)} · {f.pago?.pagador} · por {VIA[f.pago?.via || ''] || f.pago?.via}</span></>
-                      : '❌ No pagó'}
+                      : <>❌ No pagó{f.solape && <span style={{ color: S.warn }}> · {f.nombre}: pago en el solape, no sancionar sin revisar</span>}</>}
                   </td>
                   <td style={{ ...td, color: f.estado === 'pagado_tarde' ? S.warn : S.dim, fontSize: 13 }}>{f.pago ? fechaPago(f.pago) : '—'}</td>
                   <td style={td}>{f.pago ? clp(f.pago.monto) : '—'}</td>

@@ -40,6 +40,10 @@ export interface PagosRepo {
   partidoAnterior(match: Partido): Promise<Partido | null>;
   /** Partido siguiente no cancelado del mismo grupo (por hora de inicio), o null. */
   partidoSiguiente(match: Partido): Promise<Partido | null>;
+  /** Partidos no cancelados del grupo, del más antiguo al más nuevo. */
+  partidosActivos(groupId: string): Promise<Partido[]>;
+  /** created_at del primer mensaje match_convocatoria, por id de partido. */
+  convocatorias(groupId: string): Promise<Record<string, string>>;
   sanciones(groupId: string, appliesTo: string): Promise<Sancion[]>;
   /** INSERT simple (sin upsert). Debe lanzar { code: '23505' } si ya existe. */
   insertarSancion(s: Sancion & { group_id: string; created_by: string | null }): Promise<void>;
@@ -109,6 +113,8 @@ function convocatoriaAcotada(evento: string | null, createdAt: string | null | u
 
 interface VentanaLista {
   id: string;
+  /** Pitazo (ms). Orden de la cadena: una sola vez. */
+  inicio: number;
   desde: number;
   fin: number;
   titulares: Titular[];
@@ -119,95 +125,132 @@ function seSolapan(a: VentanaLista, b: VentanaLista): boolean {
   return a.desde < b.fin && b.desde < a.fin;
 }
 
+/** Misma cadena de ventanas que se solapan, de la más antigua a la más nueva. */
+function cadenaSolape(orden: VentanaLista[], id: string): VentanaLista[] {
+  const i = orden.findIndex((w) => w.id === id);
+  if (i < 0) return [];
+  let lo = i;
+  let hi = i;
+  while (lo > 0 && seSolapan(orden[lo - 1], orden[lo])) lo--;
+  while (hi < orden.length - 1 && seSolapan(orden[hi], orden[hi + 1])) hi++;
+  return orden.slice(lo, hi + 1);
+}
+
+type DestinoPago =
+  | { tipo: 'match'; matchId: string; userId: string }
+  | { tipo: 'ambiguo'; matchId: string; userIds: string[] }
+  | { tipo: 'libre' };
+
+function cmpPago(a: { fecha: string; id: string }, b: { fecha: string; id: string }): number {
+  const dt = Date.parse(a.fecha) - Date.parse(b.fecha);
+  if (dt) return dt;
+  const na = Number(a.id);
+  const nb = Number(b.id);
+  if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+  return a.id.localeCompare(b.id);
+}
+
+/**
+ * Asignación única para toda la cadena. El resultado de un pago no depende
+ * de qué pichanga se esté mirando: cada vista solo lee su parte.
+ */
+function asignarEnCadena(cadena: VentanaLista[], pagos: { fecha: string; id: string }[], aliases: AliasPagador[], porId: Map<string, ReturnType<typeof aPagoMp>>): Map<string, DestinoPago> {
+  const ya = new Map<string, Set<string>>();
+  const destinos = new Map<string, DestinoPago>();
+  for (const p of [...pagos].sort(cmpPago)) {
+    const pago = porId.get(p.id)!;
+    const t = Date.parse(pago.fecha);
+    if (Number.isNaN(t)) continue;
+    let destino: DestinoPago = { tipo: 'libre' };
+    for (const w of cadena) {
+      if (t < w.desde || t >= w.fin) continue;
+      const idn = identificarPago(w.titulares, pago, aliases);
+      if (idn.tipo === 'ambiguo') { destino = { tipo: 'ambiguo', matchId: w.id, userIds: idn.userIds }; break; }
+      if (idn.tipo !== 'unico') continue;
+      const tomados = ya.get(w.id) ?? new Set<string>();
+      if (tomados.has(idn.userId)) continue;
+      tomados.add(idn.userId);
+      ya.set(w.id, tomados);
+      destino = { tipo: 'match', matchId: w.id, userId: idn.userId };
+      break;
+    }
+    destinos.set(p.id, destino);
+  }
+  return destinos;
+}
+
 async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
-  const [eventoConv, anterior, siguiente, eventoCierre, aliases, miembros] = await Promise.all([
-    deps.repo.eventoConvocatoria(m),
-    deps.repo.partidoAnterior(m),
-    deps.repo.partidoSiguiente(m),
+  const [activos, convs, eventoCierre, aliases, miembros] = await Promise.all([
+    deps.repo.partidosActivos(m.group_id),
+    deps.repo.convocatorias(m.group_id),
     deps.repo.eventoCierre(m),
     deps.repo.aliases(m.group_id),
     deps.repo.miembros(m.group_id),
   ]);
-  const convocatoria = eventoConv ?? m.created_at ?? null;
-  const v0 = ventanaPagos(m.date, m.time, deps.ahora(), { convocatoria });
-  const vecinos = (await Promise.all([anterior, siguiente].filter((p): p is Partido => Boolean(p)).map(async (p) => {
-    const [ev, titulares] = await Promise.all([deps.repo.eventoConvocatoria(p), titularesQuePagan(deps, p)]);
+  const lista = activos.some((p) => p.id === m.id) ? activos : [...activos, m];
+  const esqueleto: VentanaLista[] = lista.map((p) => {
     const inicio = inicioPartido(p);
-    const desde = convocatoriaAcotada(ev, p.created_at, inicio);
-    return { id: p.id, desde: desde.getTime(), fin: inicio.getTime() + DIAS_VENTANA * 86400000, titulares };
-  }))).sort((a, b) => a.desde - b.desde || a.fin - b.fin);
-  const actual: VentanaLista = { id: m.id, desde: v0.desde.getTime(), fin: v0.fin.getTime(), titulares: tit };
-  const ventanas = [...vecinos, actual].sort((a, b) => a.fin - b.fin || a.desde - b.desde);
-  // Orden de pichanga: la más antigua es la de pitazo anterior. fin - 5d = pitazo.
-  ventanas.sort((a, b) => (a.fin - b.fin) || (a.desde - b.desde));
-  const solapa = vecinos.some((o) => seSolapan(actual, o));
+    const desde = convocatoriaAcotada(convs[p.id] ?? null, p.created_at, inicio);
+    return { id: p.id, inicio: inicio.getTime(), desde: desde.getTime(), fin: inicio.getTime() + DIAS_VENTANA * 86400000, titulares: [] };
+  }).sort((a, b) => a.inicio - b.inicio || a.id.localeCompare(b.id));
+  const cadenaIds = new Set(cadenaSolape(esqueleto, m.id).map((w) => w.id));
+  if (!cadenaIds.has(m.id)) cadenaIds.add(m.id);
+  const titularesPor = new Map<string, Titular[]>([[m.id, tit]]);
+  await Promise.all([...cadenaIds].filter((id) => id !== m.id).map(async (id) => {
+    const p = lista.find((x) => x.id === id);
+    if (p) titularesPor.set(id, await titularesQuePagan(deps, p));
+  }));
+  const orden = esqueleto.filter((w) => cadenaIds.has(w.id)).map((w) => ({ ...w, titulares: titularesPor.get(w.id) || [] }));
+  const actual = orden.find((w) => w.id === m.id) || {
+    id: m.id, inicio: inicioPartido(m).getTime(), desde: 0, fin: 0, titulares: tit,
+  };
+  const v0 = ventanaPagos(m.date, m.time, deps.ahora(), { convocatoria: convs[m.id] ?? m.created_at ?? null });
+  actual.desde = v0.desde.getTime();
+  actual.fin = v0.fin.getTime();
+  const solapa = orden.some((o) => o.id !== m.id && seSolapan(actual, o));
   const v = { ...v0, solapa };
   const cierre: CierrePago = cierrePago(m, eventoCierre);
   const nombres = new Map(miembros.map((x) => [x.user_id, x.nombre]));
   const sinCerteza = new Set<string>();
   if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null, sinCerteza, nombres };
 
-  let buscarDesde = v0.desde;
-  for (const o of vecinos) {
-    if (o.desde < buscarDesde.getTime()) buscarDesde = new Date(o.desde);
-  }
+  const buscarDesde = new Date(Math.min(...orden.map((w) => w.desde)));
   const ahora = deps.ahora();
   if (ahora.getTime() <= buscarDesde.getTime()) {
     return { v, cierre, cruce: cruzarPagos(tit, [], aliases, (id) => nombres.get(id), cierre.en), sinCerteza, nombres };
   }
   const raw = await deps.mp.buscarAprobados(isoSantiago(buscarDesde), isoSantiago(ahora));
   const precio = m.price != null ? Number(m.price) : null;
-  const pagos = raw.filter((r) => esPagoDePichanga(r, precio)).map(aPagoMp)
-    .sort((a, b) => Date.parse(a.fecha) - Date.parse(b.fecha) || a.id.localeCompare(b.id));
+  const pagos = raw.filter((r) => esPagoDePichanga(r, precio)).map(aPagoMp);
+  const porId = new Map(pagos.map((p) => [p.id, p]));
+  const destinos = asignarEnCadena(orden, pagos, aliases, porId);
+  const asignadosAqui = new Set<string>();
+  for (const d of destinos.values()) if (d.tipo === 'match' && d.matchId === m.id) asignadosAqui.add(d.userId);
 
-  const ya = new Map<string, Set<string>>();
   const propios: ReturnType<typeof aPagoMp>[] = [];
   const fuera: ReturnType<typeof aPagoMp>[] = [];
   for (const p of pagos) {
     const t = Date.parse(p.fecha);
     if (Number.isNaN(t)) continue;
     const enActual = t >= actual.desde && t < actual.fin;
-    const candidatos = ventanas.filter((w) => t >= w.desde && t < w.fin);
-    let destino: string | null = null;
-    let bloqueado = false;
-    for (const w of candidatos) {
-      const idn = identificarPago(w.titulares, p, aliases);
-      if (idn.tipo === 'ambiguo') {
-        if (w.id === m.id) idn.userIds.forEach((u) => sinCerteza.add(u));
-        else if (enActual) {
-          const aqui = identificarPago(actual.titulares, p, aliases);
-          if (aqui.tipo === 'unico') sinCerteza.add(aqui.userId);
-          else if (aqui.tipo === 'ambiguo') aqui.userIds.forEach((u) => sinCerteza.add(u));
-        }
-        bloqueado = true;
-        break;
-      }
-      if (idn.tipo !== 'unico') continue;
-      const tomados = ya.get(w.id) ?? new Set<string>();
-      if (tomados.has(idn.userId)) continue;
-      tomados.add(idn.userId);
-      ya.set(w.id, tomados);
-      destino = w.id;
-      break;
-    }
+    const d = destinos.get(p.id) ?? { tipo: 'libre' as const };
     if (!enActual) { fuera.push(p); continue; }
-    if (bloqueado) {
-      // Ambiguo en esta pichanga: se muestra y no se asigna. Si la duda es de
-      // una pichanga más antigua, aquí no se asigna y no se puede sancionar.
-      const aqui = identificarPago(actual.titulares, p, aliases);
-      if (aqui.tipo === 'ambiguo') propios.push(p);
-      else if (aqui.tipo === 'unico') sinCerteza.add(aqui.userId);
+    if (d.tipo === 'match' && d.matchId === m.id) { propios.push(p); continue; }
+    if (d.tipo === 'libre') { propios.push(p); continue; }
+    if (d.tipo === 'ambiguo') {
+      if (d.matchId === m.id) {
+        d.userIds.forEach((u) => sinCerteza.add(u));
+        propios.push(p);
+      } else {
+        const aqui = identificarPago(actual.titulares, p, aliases);
+        if (aqui.tipo === 'ambiguo') { aqui.userIds.forEach((u) => sinCerteza.add(u)); propios.push(p); }
+        else if (aqui.tipo === 'unico' && !asignadosAqui.has(aqui.userId)) sinCerteza.add(aqui.userId);
+      }
       continue;
     }
-    if (destino === m.id || destino === null) propios.push(p);
-    else {
-      const aqui = identificarPago(actual.titulares, p, aliases);
-      const yaAqui = ya.get(m.id);
-      // Si este jugador ya tiene pago en ESTA pichanga, el extra se fue a la
-      // siguiente con certeza: la sanción por pago tarde no se bloquea.
-      if (aqui.tipo === 'unico' && !yaAqui?.has(aqui.userId)) sinCerteza.add(aqui.userId);
-      else if (aqui.tipo === 'ambiguo') aqui.userIds.forEach((u) => sinCerteza.add(u));
-    }
+    const aqui = identificarPago(actual.titulares, p, aliases);
+    if (aqui.tipo === 'unico' && !asignadosAqui.has(aqui.userId)) sinCerteza.add(aqui.userId);
+    else if (aqui.tipo === 'ambiguo') aqui.userIds.forEach((u) => { if (!asignadosAqui.has(u)) sinCerteza.add(u); });
   }
   return {
     v, cierre, sinCerteza, nombres,
@@ -225,7 +268,7 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
   const revisado_at = deps.ahora().toISOString();
   const { m, recientes } = await elegirPartido(deps, groupId, matchId);
   const tit = await titularesQuePagan(deps, m);
-  const { v, cierre, cruce: c } = await cruce(deps, m, tit);
+  const { v, cierre, cruce: c, sinCerteza } = await cruce(deps, m, tit);
   const fecha_sancion = await fechaSancion(deps.repo, m);
   const [sanc, aliases, miembros] = await Promise.all([
     deps.repo.sanciones(m.group_id, fecha_sancion),
@@ -247,7 +290,7 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
     },
     fecha_sancion,
     titulares: (c?.titulares ?? tit.map((t) => ({ user_id: t.user_id, nombre: t.nombre, estado: 'no_pagado' as const, pago: null })))
-      .map((f) => ({ ...f, sancion: sancionPor.get(f.user_id) ?? null })),
+      .map((f) => ({ ...f, sancion: sancionPor.get(f.user_id) ?? null, solape: sinCerteza.has(f.user_id) })),
     sin_asignar: c?.sin_asignar ?? [],
     resumen: c?.resumen ?? null,
     alias: aliases.map((a) => ({ id: a.id, jugador: nombres.get(a.user_id) || 'Jugador', pagador: a.payer_label || '—' })),

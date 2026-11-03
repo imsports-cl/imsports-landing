@@ -94,6 +94,28 @@ export const repoSupabase: PagosRepo = {
       .filter((p) => inicioPartido(p).getTime() < inicio)
       .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
   },
+  async partidosActivos(groupId) {
+    const { data, error } = await db.from('matches').select(PARTIDO)
+      .eq('group_id', groupId).neq('status', 'cancelled')
+      .order('date', { ascending: true });
+    err(error);
+    return ((data || []) as Partido[])
+      .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime());
+  },
+  async convocatorias(groupId) {
+    const { data, error } = await db.from('group_messages').select('created_at, metadata')
+      .eq('group_id', groupId).eq('type', 'system')
+      .eq('metadata->>kind', 'match_convocatoria');
+    err(error);
+    const out: Record<string, string> = {};
+    for (const row of (data || []) as { created_at?: string; metadata?: { match_id?: string } }[]) {
+      const id = row.metadata?.match_id;
+      const at = row.created_at;
+      if (!id || !at) continue;
+      if (!out[id] || at < out[id]) out[id] = at;
+    }
+    return out;
+  },
   async partidoSiguiente(m) {
     const { data, error } = await db.from('matches').select(PARTIDO)
       .eq('group_id', m.group_id).gte('date', m.date).neq('id', m.id).neq('status', 'cancelled')
