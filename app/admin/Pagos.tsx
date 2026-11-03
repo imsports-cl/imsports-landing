@@ -19,6 +19,7 @@ interface Cierre { en: string | null; fuente: 'match_closed' | 'inicio_partido' 
 interface SinAsignar extends PagoV { motivo: string; candidatos: string[] }
 interface Datos {
   configurado: boolean;
+  mp_incompleto?: boolean;
   /** ISO: hora del servidor al consultar MercadoPago */
   revisado_at?: string;
   partidos: { id: string; fecha: string; hora: string | null; cancelado: boolean }[];
@@ -139,6 +140,11 @@ export default function Pagos({ token }: { token: string }) {
               pagos aprobados en MercadoPago desde {fechaHora(d.partido.ventana.desde)} hasta {fechaHora(d.partido.ventana.hasta)}
               {!d.partido.ventana.cerrada && ` (sigue abierta: cierra ${DIAS_VENTANA} días después del partido)`}
             </p>
+          {d.mp_incompleto && (
+            <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
+              Mercado Pago devolvió demasiados pagos para esta ventana. Los estados quedan sin certeza: no se puede sancionar hasta que la búsqueda quepa.
+            </p>
+          )}
           {d.partido.ventana.solapa && (
             <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
               Esta ventana se solapa con otra pichanga. Un pago del tramo común se asigna a la más antigua que ese jugador todavía no tiene pagada. Revísalo antes de sancionar.

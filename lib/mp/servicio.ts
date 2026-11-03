@@ -22,6 +22,8 @@ export interface PagosRepo {
   partido(matchId: string): Promise<Partido | null>;
   /** Titulares confirmados (is_starter = true), con correo de la app (solo servidor) */
   titulares(match: Partido): Promise<Titular[]>;
+  /** Igual que titulares, de varios partidos en una sola lectura. */
+  titularesDe(matches: Partido[]): Promise<Record<string, Titular[]>>;
   miembros(groupId: string): Promise<{ user_id: string; nombre: string }[]>;
   aliases(groupId: string): Promise<(AliasPagador & { id: string; payer_label: string | null })[]>;
   /** Fecha (YYYY-MM-DD) del siguiente partido no cancelado del grupo, o null */
@@ -40,10 +42,13 @@ export interface PagosRepo {
   partidoAnterior(match: Partido): Promise<Partido | null>;
   /** Partido siguiente no cancelado del mismo grupo (por hora de inicio), o null. */
   partidoSiguiente(match: Partido): Promise<Partido | null>;
-  /** Partidos no cancelados del grupo, del más antiguo al más nuevo. */
-  partidosActivos(groupId: string): Promise<Partido[]>;
-  /** created_at del primer mensaje match_convocatoria, por id de partido. */
-  convocatorias(groupId: string): Promise<Record<string, string>>;
+  /**
+   * Partidos no cancelados con pitazo en [desde, hasta), como mucho `limite`.
+   * desde/hasta son ISO. Orden: del más antiguo al más nuevo.
+   */
+  partidosActivos(groupId: string, desde: string, hasta: string, limite: number): Promise<Partido[]>;
+  /** Primer match_convocatoria de esos partidos, ordenado por created_at. */
+  convocatorias(groupId: string, matchIds: string[]): Promise<Record<string, string>>;
   sanciones(groupId: string, appliesTo: string): Promise<Sancion[]>;
   /** INSERT simple (sin upsert). Debe lanzar { code: '23505' } si ya existe. */
   insertarSancion(s: Sancion & { group_id: string; created_by: string | null }): Promise<void>;
@@ -111,12 +116,27 @@ function convocatoriaAcotada(evento: string | null, createdAt: string | null | u
   return d;
 }
 
+/** Tope de la cadena: 6 partidos o 45 días (el bloque calendario), lo que llegue antes. */
+const CADENA_MAX = 6;
+const CADENA_DIAS = 45;
+const EPOCH_CADENA = Date.UTC(2020, 0, 1);
+const DIA_MS = 86400000;
+const LIMITE_PARTIDOS = 20;
+
+function bucketDe(inicioMs: number): { desde: number; hasta: number } {
+  const n = Math.floor((inicioMs - EPOCH_CADENA) / (CADENA_DIAS * DIA_MS));
+  const desde = EPOCH_CADENA + n * CADENA_DIAS * DIA_MS;
+  return { desde, hasta: desde + CADENA_DIAS * DIA_MS };
+}
+
 interface VentanaLista {
   id: string;
   /** Pitazo (ms). Orden de la cadena: una sola vez. */
   inicio: number;
   desde: number;
   fin: number;
+  /** Un partido cancelado no recibe pagos. */
+  recibe: boolean;
   titulares: Titular[];
 }
 
@@ -165,6 +185,7 @@ function asignarEnCadena(cadena: VentanaLista[], pagos: { fecha: string; id: str
     for (const w of cadena) {
       if (t < w.desde || t >= w.fin) continue;
       const idn = identificarPago(w.titulares, pago, aliases);
+      if (!w.recibe) continue;
       if (idn.tipo === 'ambiguo') { destino = { tipo: 'ambiguo', matchId: w.id, userIds: idn.userIds }; break; }
       if (idn.tipo !== 'unico') continue;
       const tomados = ya.get(w.id) ?? new Set<string>();
@@ -179,30 +200,48 @@ function asignarEnCadena(cadena: VentanaLista[], pagos: { fecha: string; id: str
   return destinos;
 }
 
+function paganDe(deps: Deps, filas: Titular[]): Titular[] {
+  const no = new Set(deps.noPagan.map(normalizarEmail));
+  return filas.filter((t) => !no.has(normalizarEmail(t.email)));
+}
+
+/** Trozo de a lo más 6 partidos. El mismo trozo para cualquiera de sus vistas. */
+function acotarCadena(comp: VentanaLista[], id: string, bucketDesde: number): { cadena: VentanaLista[]; borde: boolean } {
+  const idx = Math.max(0, comp.findIndex((w) => w.id === id));
+  const start = Math.floor(idx / CADENA_MAX) * CADENA_MAX;
+  const cadena = comp.slice(start, start + CADENA_MAX);
+  const borde = start > 0 || (cadena[0] != null && cadena[0].desde < bucketDesde);
+  return { cadena, borde };
+}
+
 async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
-  const [activos, convs, eventoCierre, aliases, miembros] = await Promise.all([
-    deps.repo.partidosActivos(m.group_id),
-    deps.repo.convocatorias(m.group_id),
+  const visto = inicioPartido(m).getTime();
+  const bucket = bucketDe(visto);
+  const [activos, eventoCierre, aliases, miembros] = await Promise.all([
+    deps.repo.partidosActivos(m.group_id, new Date(bucket.desde).toISOString(), new Date(bucket.hasta).toISOString(), LIMITE_PARTIDOS),
     deps.repo.eventoCierre(m),
     deps.repo.aliases(m.group_id),
     deps.repo.miembros(m.group_id),
   ]);
   const lista = activos.some((p) => p.id === m.id) ? activos : [...activos, m];
+  const convs = await deps.repo.convocatorias(m.group_id, lista.map((p) => p.id));
   const esqueleto: VentanaLista[] = lista.map((p) => {
     const inicio = inicioPartido(p);
     const desde = convocatoriaAcotada(convs[p.id] ?? null, p.created_at, inicio);
-    return { id: p.id, inicio: inicio.getTime(), desde: desde.getTime(), fin: inicio.getTime() + DIAS_VENTANA * 86400000, titulares: [] };
+    return {
+      id: p.id, inicio: inicio.getTime(), desde: desde.getTime(),
+      fin: inicio.getTime() + DIAS_VENTANA * 86400000,
+      recibe: p.status !== 'cancelled', titulares: [],
+    };
   }).sort((a, b) => a.inicio - b.inicio || a.id.localeCompare(b.id));
-  const cadenaIds = new Set(cadenaSolape(esqueleto, m.id).map((w) => w.id));
-  if (!cadenaIds.has(m.id)) cadenaIds.add(m.id);
+  const { cadena: trozo, borde } = acotarCadena(cadenaSolape(esqueleto, m.id), m.id, bucket.desde);
+  const otros = trozo.filter((w) => w.id !== m.id).map((w) => lista.find((p) => p.id === w.id)).filter((p): p is Partido => Boolean(p));
+  const leidos = await deps.repo.titularesDe(otros);
   const titularesPor = new Map<string, Titular[]>([[m.id, tit]]);
-  await Promise.all([...cadenaIds].filter((id) => id !== m.id).map(async (id) => {
-    const p = lista.find((x) => x.id === id);
-    if (p) titularesPor.set(id, await titularesQuePagan(deps, p));
-  }));
-  const orden = esqueleto.filter((w) => cadenaIds.has(w.id)).map((w) => ({ ...w, titulares: titularesPor.get(w.id) || [] }));
+  for (const [id, filas] of Object.entries(leidos)) titularesPor.set(id, paganDe(deps, filas));
+  const orden = trozo.map((w) => ({ ...w, titulares: titularesPor.get(w.id) || [] }));
   const actual = orden.find((w) => w.id === m.id) || {
-    id: m.id, inicio: inicioPartido(m).getTime(), desde: 0, fin: 0, titulares: tit,
+    id: m.id, inicio: visto, desde: 0, fin: 0, recibe: m.status !== 'cancelled', titulares: tit,
   };
   const v0 = ventanaPagos(m.date, m.time, deps.ahora(), { convocatoria: convs[m.id] ?? m.created_at ?? null });
   actual.desde = v0.desde.getTime();
@@ -212,14 +251,18 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
   const cierre: CierrePago = cierrePago(m, eventoCierre);
   const nombres = new Map(miembros.map((x) => [x.user_id, x.nombre]));
   const sinCerteza = new Set<string>();
-  if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null, sinCerteza, nombres };
+  // El partido del borde del tope (había historia más atrás) no se puede sancionar.
+  if (borde && orden[0]?.id === m.id) for (const t of tit) sinCerteza.add(t.user_id);
+  if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null, sinCerteza, nombres, mpIncompleto: false };
 
   const buscarDesde = new Date(Math.min(...orden.map((w) => w.desde)));
   const ahora = deps.ahora();
   if (ahora.getTime() <= buscarDesde.getTime()) {
-    return { v, cierre, cruce: cruzarPagos(tit, [], aliases, (id) => nombres.get(id), cierre.en), sinCerteza, nombres };
+    return { v, cierre, cruce: cruzarPagos(tit, [], aliases, (id) => nombres.get(id), cierre.en), sinCerteza, nombres, mpIncompleto: false };
   }
   const raw = await deps.mp.buscarAprobados(isoSantiago(buscarDesde), isoSantiago(ahora));
+  const mpIncompleto = Boolean((raw as { truncado?: boolean }).truncado);
+  if (mpIncompleto) for (const t of tit) sinCerteza.add(t.user_id);
   const precio = m.price != null ? Number(m.price) : null;
   const pagos = raw.filter((r) => esPagoDePichanga(r, precio)).map(aPagoMp);
   const porId = new Map(pagos.map((p) => [p.id, p]));
@@ -253,7 +296,7 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
     else if (aqui.tipo === 'ambiguo') aqui.userIds.forEach((u) => { if (!asignadosAqui.has(u)) sinCerteza.add(u); });
   }
   return {
-    v, cierre, sinCerteza, nombres,
+    v, cierre, sinCerteza, nombres, mpIncompleto,
     cruce: cruzarPagos(tit, propios, aliases, (id) => nombres.get(id), cierre.en, fuera),
   };
 }
@@ -268,7 +311,7 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
   const revisado_at = deps.ahora().toISOString();
   const { m, recientes } = await elegirPartido(deps, groupId, matchId);
   const tit = await titularesQuePagan(deps, m);
-  const { v, cierre, cruce: c, sinCerteza } = await cruce(deps, m, tit);
+  const { v, cierre, cruce: c, sinCerteza, mpIncompleto } = await cruce(deps, m, tit);
   const fecha_sancion = await fechaSancion(deps.repo, m);
   const [sanc, aliases, miembros] = await Promise.all([
     deps.repo.sanciones(m.group_id, fecha_sancion),
@@ -280,6 +323,8 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
 
   return {
     configurado: Boolean(deps.mp),
+    /** La búsqueda de Mercado Pago se cortó en el tope de páginas: no sancionar. */
+    mp_incompleto: mpIncompleto,
     revisado_at,
     partidos: recientes.map((p) => ({ id: p.id, fecha: ymd(p.date), hora: p.time, cancelado: p.status === 'cancelled' })),
     partido: {

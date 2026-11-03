@@ -11,6 +11,11 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
     async partidosRecientes(g, n) { return init.partidos.filter((p) => p.group_id === g).sort((a, b) => b.date.localeCompare(a.date)).slice(0, n); },
     async partido(id) { return init.partidos.find((p) => p.id === id) || null; },
     async titulares(m) { return init.titulares[m.id] || []; },
+    async titularesDe(matches) {
+      const out: Record<string, Titular[]> = {};
+      for (const m of matches) out[m.id] = init.titulares[m.id] || [];
+      return out;
+    },
     async miembros() { return miembros; },
     async aliases(g) { return aliases.filter((a) => a.group_id === g); },
     async siguienteFecha(m) {
@@ -25,17 +30,22 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
         .filter((p) => p.group_id === m.group_id && p.id !== m.id && p.status !== 'cancelled' && inicioPartido(p).getTime() < inicio)
         .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
     },
-    async partidosActivos(g) {
-      return init.partidos.filter((p) => p.group_id === g && p.status !== 'cancelled')
-        .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime());
+    async partidosActivos(g, desde, hasta, limite) {
+      const a = Date.parse(desde);
+      const b = Date.parse(hasta);
+      return init.partidos.filter((p) => p.group_id === g && p.status !== 'cancelled'
+        && inicioPartido(p).getTime() >= a && inicioPartido(p).getTime() < b)
+        .sort((x, y) => inicioPartido(x).getTime() - inicioPartido(y).getTime())
+        .slice(0, limite);
     },
-    async convocatorias(g) {
+    async convocatorias(g, ids) {
+      const set = new Set(ids);
       const out: Record<string, string> = {};
-      for (const p of init.partidos) {
-        if (p.group_id !== g) continue;
-        const c = init.convocatorias?.[p.id];
-        if (c) out[p.id] = c;
-      }
+      const pares = init.partidos
+        .filter((p) => p.group_id === g && set.has(p.id) && init.convocatorias?.[p.id])
+        .map((p) => ({ id: p.id, at: init.convocatorias![p.id] as string }))
+        .sort((x, y) => x.at.localeCompare(y.at));
+      for (const p of pares) if (!out[p.id]) out[p.id] = p.at;
       return out;
     },
     async partidoSiguiente(m) {

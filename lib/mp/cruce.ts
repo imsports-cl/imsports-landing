@@ -167,6 +167,16 @@ export function identificarPago(
   return elegido ? { tipo: 'unico', userId: elegido } : { tipo: 'ninguno' };
 }
 
+/** Si dos titulares se llaman igual, la inicial del apellido los distingue en el aviso. */
+function etiquetasAmbiguas(ts: Titular[]): string[] {
+  return ts.map((t) => {
+    const partes = (t.display_name || '').trim().split(/\s+/).filter(Boolean);
+    const apellido = partes.length > 1 ? partes[partes.length - 1] : '';
+    const repetido = ts.filter((x) => x.nombre === t.nombre).length > 1;
+    return repetido && apellido ? `${t.nombre} ${apellido[0].toUpperCase()}.` : t.nombre;
+  });
+}
+
 const visible = (p: PagoMp, cierre: Date | string | null): PagoVisible => ({
   id: p.id, fecha: p.fecha, monto: p.monto, pagador: p.pagador,
   fecha_clt: fechaHoraClt(p.fecha), tarde: esPagoTarde(p.fecha, cierre),
@@ -215,7 +225,7 @@ export function cruzarPagos(
         pago.nombres.some((n) => calzaNombre(p, n)) || calzaNombreEnEmail(p, pago));
       if (porNombre.length === 1) { elegido = porNombre[0]; via = 'nombre'; }
       else if (porNombre.length > 1) {
-        sin.push({ ...vis(pago), motivo: 'ambiguo', candidatos: porNombre.map((p) => p.t.nombre) });
+        sin.push({ ...vis(pago), motivo: 'ambiguo', candidatos: etiquetasAmbiguas(porNombre.map((p) => p.t)) });
         continue;
       }
     }
