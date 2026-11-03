@@ -1,57 +1,97 @@
 /**
  * Arma el mensaje de cierre con lecturas que el panel ya usa.
- * Solo lectura: admin_lineup (cupos asegurados) y las pichangas futuras.
- * Si una lectura falla, el texto de «pierde cupo» igual sale y «asegura» queda vacío.
+ * Solo lectura. El +28 de la banca es texto: en la base lo calcula
+ * admin_lineup cuando el partido queda completado.
+ * Si admin_lineup o la banca fallan, no se inventa «Nadie».
  */
 import 'server-only';
 import { supabase } from '../supabase';
-import { mensajeCierre, mensajeCierreBloqueado, type CupoAsegurado, type FechaFutura, type TitularCierre } from './mensaje';
-
-const FUTUROS_MAX = 60;
+import { santiagoAUtc } from '../mp/tiempo';
+import {
+  mensajeCierre,
+  type BancaCierre,
+  type CupoAsegurado,
+  type TitularCierre,
+} from './mensaje';
 
 export async function mensajeDePagos(
   estado: {
-    partido: { id: string; fecha: string };
-    titulares: TitularCierre[];
+    configurado: boolean;
     historial_incompleto?: boolean;
     mp_incompleto?: boolean;
+    partido: { id: string; fecha: string; hora: string | null };
+    titulares: TitularCierre[];
   },
   groupId: string,
 ) {
   const cupos: CupoAsegurado[] = [];
-  const futuros: FechaFutura[] = [];
+  const banca: BancaCierre[] = [];
+  let cuposDisponibles = true;
   try {
-    const [lineup, matches] = await Promise.all([
+    const [lineup, confs, partido, members] = await Promise.all([
       supabase.rpc('admin_lineup', { p_group_id: groupId, p_match_id: estado.partido.id, p_cupos: 12 }),
-      supabase.from('matches').select('id, date')
-        .eq('group_id', groupId)
-        .gt('date', estado.partido.fecha)
-        .neq('status', 'cancelled')
-        .order('date', { ascending: true })
-        .limit(FUTUROS_MAX),
+      supabase.from('match_confirmations')
+        .select('user_id, responded_at, user:users(display_name)')
+        .eq('match_id', estado.partido.id)
+        .eq('status', 'confirmed')
+        .eq('is_starter', false)
+        .order('responded_at', { ascending: true }),
+      supabase.from('matches').select('starters_announced_at').eq('id', estado.partido.id).maybeSingle(),
+      supabase.from('group_members').select('user_id, nickname').eq('group_id', groupId),
     ]);
-    if (lineup.error) console.error('[admin/pagos] admin_lineup', lineup.error.code ?? 'error');
-    else {
-      const rows = ((lineup.data as { cupos_asegurados?: { user_id?: string; nombre?: string; hasta?: string }[] } | null)?.cupos_asegurados) || [];
+    if (lineup.error || confs.error || partido.error) {
+      cuposDisponibles = false;
+      console.error('[admin/pagos] cupos', lineup.error?.code || confs.error?.code || partido.error?.code || 'error');
+    } else {
+      const rows = ((lineup.data as { cupos_asegurados?: { user_id?: string; nombre?: string; hasta?: string; manual?: boolean; es_mvp?: boolean; es_organizador?: boolean }[] } | null)?.cupos_asegurados) || [];
       for (const r of rows) {
         if (!r.user_id || !r.hasta) continue;
-        cupos.push({ user_id: r.user_id, nombre: r.nombre || 'Jugador', hasta: String(r.hasta).slice(0, 10) });
+        cupos.push({
+          user_id: r.user_id,
+          nombre: r.nombre || 'Jugador',
+          hasta: String(r.hasta).slice(0, 10),
+          manual: Boolean(r.manual),
+          es_mvp: Boolean(r.es_mvp),
+          es_organizador: Boolean(r.es_organizador),
+        });
+      }
+      const nick = new Map<string, string>();
+      for (const m of members.data || []) {
+        const row = m as { user_id: string; nickname: string | null };
+        if (row.nickname) nick.set(row.user_id, row.nickname);
+      }
+      const anunciado = partido.data?.starters_announced_at ? Date.parse(partido.data.starters_announced_at) : NaN;
+      for (const c of confs.data || []) {
+        const row = c as { user_id: string; responded_at: string | null; user?: { display_name?: string | null } | null };
+        const respondio = row.responded_at ? Date.parse(row.responded_at) : NaN;
+        banca.push({
+          user_id: row.user_id,
+          nombre: nick.get(row.user_id) || row.user?.display_name || 'Jugador',
+          responded_at: row.responded_at || '',
+          confirmo_tarde: Number.isFinite(anunciado) && Number.isFinite(respondio) && respondio > anunciado,
+        });
       }
     }
-    if (matches.error) console.error('[admin/pagos] partidos futuros', matches.error.code ?? 'error');
-    else {
-      for (const m of matches.data || []) futuros.push({ fecha: String((m as { date: string }).date).slice(0, 10) });
-    }
   } catch (e) {
+    cuposDisponibles = false;
     console.error('[admin/pagos] mensaje cierre', (e as { message?: string })?.message ?? 'error');
   }
+  const partidoEmpezo = santiagoAUtc(estado.partido.fecha, estado.partido.hora).getTime() <= Date.now();
+  const listo = mensajeCierre({
+    titulares: estado.titulares,
+    cupos,
+    banca,
+    fechaPartido: estado.partido.fecha,
+    configurado: estado.configurado,
+    historialIncompleto: estado.historial_incompleto,
+    mpIncompleto: estado.mp_incompleto,
+    partidoEmpezo,
+    cuposDisponibles,
+  });
   return {
-    mensaje_cierre: mensajeCierre({
-      titulares: estado.titulares,
-      cupos,
-      futuros,
-      fechaPartido: estado.partido.fecha,
-    }),
-    mensaje_cierre_bloqueado: mensajeCierreBloqueado(estado),
+    mensaje_cierre: listo.texto,
+    mensaje_cierre_bloqueado: listo.bloqueado,
+    mensaje_cierre_aviso: listo.aviso,
+    bloqueo: listo.bloqueo,
   };
 }

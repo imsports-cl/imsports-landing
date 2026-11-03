@@ -430,6 +430,28 @@ export async function mapearPagador(deps: Deps, groupId: string, paymentId: stri
 }
 
 /**
+ * Lo que el botón «Cargar sanción no_pago» rechazaría antes de mirar si ya
+ * hay otra sanción. El mensaje de cierre usa la misma función: quien no pasa
+ * no entra en «Pierde cupo».
+ */
+export function rechazoSancionNoPago(p: {
+  partidoEmpezo: boolean;
+  configurado: boolean;
+  historialIncompleto: boolean;
+  estado: 'pagado' | 'pagado_tarde' | 'no_pagado' | null;
+  sinCerteza: boolean;
+  nombre: string;
+}): { status: number; message: string } | null {
+  if (!p.partidoEmpezo) return { status: 400, message: 'el partido todavía no se juega' };
+  if (!p.configurado) return { status: 503, message: 'sin MercadoPago no se puede verificar el pago' };
+  if (p.historialIncompleto) return { status: 409, message: 'Historial incompleto (más de 200 pichangas o 2 años solapados); no se puede sancionar' };
+  if (p.estado === 'pagado') return { status: 409, message: `${p.nombre} figura con pago a tiempo` };
+  if (p.sinCerteza) return { status: 409, message: `${p.nombre} tiene un pago en el solape de ventanas; revísalo antes de sancionar` };
+  if (p.estado !== 'no_pagado' && p.estado !== 'pagado_tarde') return { status: 409, message: 'estado de pago desconocido' };
+  return null;
+}
+
+/**
  * Sanción "no_pago" (pierde cupo la próxima fecha). Idempotente: si ya existe
  * la misma sanción no hace nada; si ya tiene OTRA sanción esa fecha, no la pisa.
  * Exige confirmar === true y que el jugador sea titular y figure sin pagar.
@@ -449,17 +471,16 @@ export async function sancionarNoPago(
   if (!jugador) throw new ErrorPagos('no es titular de este partido (o no paga)');
   if (!deps.mp) throw new ErrorPagos('sin MercadoPago no se puede verificar el pago', 503);
   const { cruce: c, sinCerteza, historialIncompleto } = await cruce(deps, m, tit);
-  if (historialIncompleto) {
-    throw new ErrorPagos('Historial incompleto (más de 200 pichangas o 2 años solapados); no se puede sancionar', 409);
-  }
-  // Solo bloquea a quien pagó A TIEMPO. «Pagó tarde» no levanta la sanción: se puede cargar.
-  if (c?.titulares.find((f) => f.user_id === jugador.user_id)?.estado === 'pagado') {
-    throw new ErrorPagos(`${jugador.nombre} figura con pago a tiempo`, 409);
-  }
-  // Pago en más de una ventana que no se pudo asignar con certeza a ESTA pichanga.
-  if (sinCerteza.has(jugador.user_id)) {
-    throw new ErrorPagos(`${jugador.nombre} tiene un pago en el solape de ventanas; revísalo antes de sancionar`, 409);
-  }
+  const estado = c?.titulares.find((f) => f.user_id === jugador.user_id)?.estado ?? null;
+  const rechazo = rechazoSancionNoPago({
+    partidoEmpezo: true,
+    configurado: true,
+    historialIncompleto,
+    estado,
+    sinCerteza: sinCerteza.has(jugador.user_id),
+    nombre: jugador.nombre,
+  });
+  if (rechazo && rechazo.message !== 'estado de pago desconocido') throw new ErrorPagos(rechazo.message, rechazo.status);
 
   const applies_to = await fechaSancion(deps.repo, m);
   const previa = (await deps.repo.sanciones(groupId, applies_to)).find((s) => s.user_id === jugador.user_id);

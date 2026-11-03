@@ -6,29 +6,62 @@
  * a tiempo (`pagado`). «Pagó tarde» tampoco cuenta: pagar después del cierre
  * no levanta la sanción, igual que en el panel.
  *
- * «Asegura cupo hasta» usa el `hasta` de admin_lineup → cupos_asegurados
- * (banca automática de 28 días, guaranteed_spots.until_date, o el máximo).
- * Solo entran fechas estrictamente posteriores a la pichanga que se cierra.
- * Si hay una pichanga futura no cancelada en una fecha ≤ hasta, el jugador
- * queda en la última de esas. Si no hay ninguna creada, se usa el `hasta`
- * tal cual («9 de noviembre»). Quien pierde cupo por no pago no asegura.
- * Cada jugador sale una vez. El orden de los nombres es el de la tabla de
- * titulares; quien no está en esa tabla sigue el orden en que vino el cupo.
+ * «Asegura cupo hasta» junta dos cosas, agrupadas por la fecha misma
+ * (no por partidos que todavía no existen):
+ * - Quien quedó en la banca hoy (confirmado, is_starter false, y no
+ *   confirmo_tarde si EXCLUIR_BANCA_CONFIRMO_TARDE) asegura hasta
+ *   esta fecha + 28 días. Si ya tenía cupo que cubría hoy y no lo usó
+ *   (no fue titular, o pierde cupo por no pago), no suma los 28 días y
+ *   pierde el cupo anterior.
+ * - El resto de cupos_asegurados.hasta, solo si es posterior a hoy y el
+ *   jugador fue titular y no está en «Pierde cupo».
+ * Cada jugador sale una vez, en la fecha más tardía. Nadie solo si los
+ * datos cargaron y el conjunto está vacío.
  */
 
+import { rechazoSancionNoPago } from '../mp/servicio';
+
 export type EstadoPagoCierre = 'pagado' | 'pagado_tarde' | 'no_pagado';
+
+/** La banca que confirmó después del anuncio no asegura. Una sola llave, por si Barham la da vuelta. */
+export const EXCLUIR_BANCA_CONFIRMO_TARDE = true;
+/** Cuatro fechas semanales. */
+export const DIAS_CUPO_BANCA = 28;
 
 export interface TitularCierre {
   user_id?: string;
   nombre: string;
   estado: EstadoPagoCierre;
+  /** Pago en solape u otra duda: el botón de sanción responde 409. */
+  solape?: boolean;
 }
+
+/** Confirmado y no titular. El orden es responded_at. */
+export interface BancaCierre {
+  user_id: string;
+  nombre: string;
+  responded_at: string;
+  confirmo_tarde?: boolean;
+}
+
+export type BloqueoMensaje =
+  | 'historial_incompleto'
+  | 'mp_no_configurado'
+  | 'mp_incompleto'
+  | 'cupos_no_disponibles'
+  | 'sin_certeza'
+  | null;
 
 export interface CupoAsegurado {
   user_id: string;
   nombre: string;
   /** YYYY-MM-DD. Hasta qué día (inclusive) le dura el cupo. */
   hasta: string;
+  /** guaranteed_spots.until_date. No se pierde por quedar en la banca. */
+  manual?: boolean;
+  /** Cupo de un solo partido (organizador o MVP). No se alarga ni se borra. */
+  es_organizador?: boolean;
+  es_mvp?: boolean;
 }
 
 export interface FechaFutura {
@@ -54,59 +87,150 @@ function diaCalendario(fecha: string): string {
   return ymd;
 }
 
-export function mensajeCierreBloqueado(v: { historial_incompleto?: boolean; mp_incompleto?: boolean }): boolean {
-  return Boolean(v.historial_incompleto || v.mp_incompleto);
+export function mensajeCierreBloqueado(v: { historial_incompleto?: boolean; mp_incompleto?: boolean; configurado?: boolean; cuposDisponibles?: boolean }): boolean {
+  return Boolean(v.historial_incompleto || v.mp_incompleto || v.configurado === false || v.cuposDisponibles === false);
+}
+
+export interface MensajeCierreListo {
+  texto: string;
+  bloqueado: boolean;
+  aviso: string | null;
+  bloqueo: BloqueoMensaje;
 }
 
 export function mensajeCierre(input: {
   titulares: TitularCierre[];
   cupos: CupoAsegurado[];
-  futuros: FechaFutura[];
+  /** Banca de esta pichanga, ya en orden de confirmación. */
+  banca?: BancaCierre[];
+  futuros?: FechaFutura[];
   /** YYYY-MM-DD de la pichanga que se cierra. */
   fechaPartido: string;
-}): string {
-  const pierde = input.titulares.filter((t) => t.estado !== 'pagado').map((t) => t.nombre);
-  const lineas = [
-    'Pierde cupo por no pago:',
-    pierde.length ? pierde.join(', ') : 'Nadie',
-    '',
-    'Asegura cupo hasta:',
-  ];
-  const grupos = gruposAsegura(input);
-  if (!grupos.length) lineas.push('Nadie');
+  configurado?: boolean;
+  historialIncompleto?: boolean;
+  mpIncompleto?: boolean;
+  partidoEmpezo?: boolean;
+  /** false si admin_lineup o la banca no se pudieron leer. */
+  cuposDisponibles?: boolean;
+}): MensajeCierreListo {
+  const configurado = input.configurado !== false;
+  const historialIncompleto = Boolean(input.historialIncompleto);
+  const mpIncompleto = Boolean(input.mpIncompleto);
+  const partidoEmpezo = input.partidoEmpezo !== false;
+  const cuposDisponibles = input.cuposDisponibles !== false;
+  const sancionables = input.titulares.filter((t) => sancionable(t, { configurado, historialIncompleto, partidoEmpezo }));
+  const pagosConfiables = configurado && !historialIncompleto && !mpIncompleto && partidoEmpezo;
+  const hayDuda = input.titulares.some((t) => t.estado !== 'pagado' && !sancionable(t, { configurado, historialIncompleto, partidoEmpezo }));
+  const bloqueo = bloqueoMensaje({ historialIncompleto, configurado, mpIncompleto, cuposDisponibles, partidoEmpezo, hayDuda });
+  const aviso = textoBloqueo(bloqueo);
+  const lineas = ['Pierde cupo por no pago:'];
+  if (sancionables.length) lineas.push(sancionables.map((t) => t.nombre).join(', '));
+  else if (pagosConfiables && !hayDuda) lineas.push('Nadie');
+  lineas.push('', 'Asegura cupo hasta:');
+  const grupos = cuposDisponibles ? gruposAsegura(input) : [];
+  if (cuposDisponibles && !grupos.length) lineas.push('Nadie');
   else for (const g of grupos) lineas.push(fechaMensaje(g.fecha), g.nombres.join(', '));
-  return lineas.join('\n');
+  return { texto: lineas.join('\n'), bloqueado: bloqueo != null, aviso, bloqueo };
+}
+
+function sancionable(t: TitularCierre, ctx: { configurado: boolean; historialIncompleto: boolean; partidoEmpezo: boolean }): boolean {
+  return rechazoSancionNoPago({
+    partidoEmpezo: ctx.partidoEmpezo,
+    configurado: ctx.configurado,
+    historialIncompleto: ctx.historialIncompleto,
+    estado: t.estado,
+    sinCerteza: Boolean(t.solape),
+    nombre: t.nombre,
+  }) == null;
+}
+
+function sumarDias(ymd: string, dias: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  t.setUTCDate(t.getUTCDate() + dias);
+  return t.toISOString().slice(0, 10);
+}
+
+function bloqueoMensaje(v: {
+  historialIncompleto: boolean;
+  configurado: boolean;
+  mpIncompleto: boolean;
+  cuposDisponibles: boolean;
+  partidoEmpezo: boolean;
+  hayDuda: boolean;
+}): BloqueoMensaje {
+  if (v.historialIncompleto) return 'historial_incompleto';
+  if (!v.configurado) return 'mp_no_configurado';
+  if (v.mpIncompleto) return 'mp_incompleto';
+  if (!v.cuposDisponibles) return 'cupos_no_disponibles';
+  if (!v.partidoEmpezo || v.hayDuda) return 'sin_certeza';
+  return null;
+}
+
+export function textoBloqueo(bloqueo: BloqueoMensaje): string | null {
+  switch (bloqueo) {
+    case 'historial_incompleto': return 'Historial incompleto: no uses este mensaje para sancionar';
+    case 'mp_no_configurado': return 'Mercado Pago no está disponible: no uses este mensaje para sancionar';
+    case 'mp_incompleto': return 'Mercado Pago incompleto: no uses este mensaje para sancionar';
+    case 'cupos_no_disponibles': return 'Cupos no disponibles: no uses este mensaje para sancionar';
+    case 'sin_certeza': return 'Hay titulares sin certeza: no uses este mensaje para sancionar';
+    default: return null;
+  }
 }
 
 function gruposAsegura(input: {
   titulares: TitularCierre[];
   cupos: CupoAsegurado[];
-  futuros: FechaFutura[];
+  banca?: BancaCierre[];
   fechaPartido: string;
 }): { fecha: string; nombres: string[] }[] {
   const hoy = diaCalendario(input.fechaPartido);
-  const futuros = [...new Set(input.futuros.map((f) => diaCalendario(f.fecha)).filter((f) => f > hoy))].sort();
   const pierdeId = new Set(input.titulares.filter((t) => t.estado !== 'pagado' && t.user_id).map((t) => t.user_id as string));
   const pierdeNombre = new Set(input.titulares.filter((t) => t.estado !== 'pagado').map((t) => t.nombre));
-  const mejor = new Map<string, { nombre: string; hasta: string; orden: number }>();
+  const enPierde = (userId: string, nombre: string) => pierdeId.has(userId) || pierdeNombre.has(nombre);
+  const bancaHoy = new Set((input.banca || []).filter((b) => !(EXCLUIR_BANCA_CONFIRMO_TARDE && b.confirmo_tarde)).map((b) => b.user_id));
+  const previo = new Map<string, CupoAsegurado & { hasta: string; orden: number }>();
   input.cupos.forEach((c, i) => {
-    if (pierdeId.has(c.user_id) || pierdeNombre.has(c.nombre)) return;
     const hasta = diaCalendario(c.hasta);
-    const idx = input.titulares.findIndex((t) => t.user_id && t.user_id === c.user_id);
+    const idx = input.titulares.findIndex((t) => t.user_id === c.user_id);
     const orden = idx >= 0 ? idx : input.titulares.length + i;
-    const prev = mejor.get(c.user_id);
-    if (!prev || hasta > prev.hasta) mejor.set(c.user_id, { nombre: c.nombre, hasta, orden: prev ? Math.min(prev.orden, orden) : orden });
-    else if (orden < prev.orden) prev.orden = orden;
+    const ant = previo.get(c.user_id);
+    if (!ant || hasta > ant.hasta) previo.set(c.user_id, { ...c, hasta, orden: ant ? Math.min(ant.orden, orden) : orden });
+    else {
+      if (c.manual) ant.manual = true;
+      if (orden < ant.orden) ant.orden = orden;
+    }
+  });
+  const mejor = new Map<string, { nombre: string; hasta: string; orden: number }>();
+  const guardar = (userId: string, nombre: string, hasta: string, orden: number) => {
+    if (hasta <= hoy) return;
+    const ant = mejor.get(userId);
+    if (!ant || hasta > ant.hasta) mejor.set(userId, { nombre, hasta, orden: ant ? Math.min(ant.orden, orden) : orden });
+    else if (orden < ant.orden) ant.orden = orden;
+  };
+  for (const [userId, c] of previo) {
+    if (enPierde(userId, c.nombre)) continue;
+    const unPartido = (c.es_mvp || c.es_organizador) && c.hasta <= hoy && !c.manual;
+    if (unPartido) continue;
+    const automatico = !c.manual;
+    if (automatico && c.hasta >= hoy && bancaHoy.has(userId)) continue;
+    guardar(userId, c.nombre, c.hasta, c.orden);
+  }
+  const banca = [...(input.banca || [])]
+    .filter((b) => !(EXCLUIR_BANCA_CONFIRMO_TARDE && b.confirmo_tarde))
+    .sort((a, b) => a.responded_at.localeCompare(b.responded_at) || a.nombre.localeCompare(b.nombre, 'es'));
+  banca.forEach((b, i) => {
+    if (enPierde(b.user_id, b.nombre)) return;
+    const tenia = previo.get(b.user_id);
+    if (tenia && tenia.hasta >= hoy) return;
+    guardar(b.user_id, b.nombre, sumarDias(hoy, DIAS_CUPO_BANCA), input.titulares.length + i);
   });
   const grupos = new Map<string, { nombre: string; orden: number }[]>();
-  for (const p of mejor.values()) {
-    if (p.hasta <= hoy) continue;
-    let fecha = '';
-    for (const f of futuros) if (f <= p.hasta) fecha = f;
-    if (!fecha) fecha = p.hasta;
-    const lista = grupos.get(fecha) ?? [];
+  for (const [userId, p] of mejor) {
+    void userId;
+    const lista = grupos.get(p.hasta) ?? [];
     lista.push({ nombre: p.nombre, orden: p.orden });
-    grupos.set(fecha, lista);
+    grupos.set(p.hasta, lista);
   }
   return [...grupos.keys()].sort().map((fecha) => ({
     fecha,

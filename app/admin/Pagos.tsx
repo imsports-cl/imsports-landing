@@ -31,6 +31,8 @@ interface Datos {
   resumen: { titulares: number; pagados: number; pagados_tarde?: number; no_pagados: number; sin_asignar: number; recaudado: number } | null;
   mensaje_cierre?: string;
   mensaje_cierre_bloqueado?: boolean;
+  mensaje_cierre_aviso?: string | null;
+  bloqueo?: 'historial_incompleto' | 'mp_no_configurado' | 'mp_incompleto' | 'cupos_no_disponibles' | 'sin_certeza' | null;
   alias: { id: string; jugador: string; pagador: string }[];
   miembros: { user_id: string; nombre: string }[];
 }
@@ -62,6 +64,7 @@ export default function Pagos({ token }: { token: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [asignar, setAsignar] = useState<Record<string, string>>({});
   const [copiado, setCopiado] = useState(false);
+  const [mensajeStale, setMensajeStale] = useState(false);
   const mensajeRef = useRef<HTMLTextAreaElement>(null);
 
   const [revisando, setRevisando] = useState(false);
@@ -79,13 +82,19 @@ export default function Pagos({ token }: { token: string }) {
       });
       const j = await r.json().catch(() => ({}));
       if (mio !== reqId.current) return;
-      if (!r.ok) { setErr(j.error || `No se pudieron cargar los pagos (${r.status})`); return; }
+      if (!r.ok) {
+        setErr(j.error || `No se pudieron cargar los pagos (${r.status})`);
+        setMensajeStale(true);
+        return;
+      }
       setD(j);
+      setMensajeStale(false);
       setCopiado(false);
       if (!id) setMatchId(j.partido.id);
     } catch {
       if (mio !== reqId.current) return;
       setErr('No se pudo conectar con el servidor. Revisa tu conexión e intenta de nuevo.');
+      setMensajeStale(true);
     }
   };
   const revisar = async () => {
@@ -125,7 +134,7 @@ export default function Pagos({ token }: { token: string }) {
   };
 
   const copiarMensaje = async () => {
-    if (!d?.mensaje_cierre || d.mensaje_cierre_bloqueado) return;
+    if (!d?.mensaje_cierre || d.mensaje_cierre_bloqueado || mensajeStale) return;
     const texto = d.mensaje_cierre;
     try {
       await navigator.clipboard.writeText(texto);
@@ -226,17 +235,17 @@ export default function Pagos({ token }: { token: string }) {
         <section style={box}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontSize: 15 }}>Mensaje de cierre</h3>
-            <button type="button" onClick={copiarMensaje} disabled={d.mensaje_cierre_bloqueado}
-              style={{ ...btn(S.accent), opacity: d.mensaje_cierre_bloqueado ? 0.45 : 1, cursor: d.mensaje_cierre_bloqueado ? 'not-allowed' : 'pointer' }}>
+            <button type="button" onClick={copiarMensaje} disabled={d.mensaje_cierre_bloqueado || mensajeStale}
+              style={{ ...btn(S.accent), opacity: d.mensaje_cierre_bloqueado || mensajeStale ? 0.45 : 1, cursor: d.mensaje_cierre_bloqueado || mensajeStale ? 'not-allowed' : 'pointer' }}>
               {copiado ? 'Copiado' : 'Copiar'}
             </button>
           </div>
-          {d.mensaje_cierre_bloqueado && (
+          {(mensajeStale || d.mensaje_cierre_aviso) && (
             <p role="status" style={{ color: S.warn, fontSize: 13, margin: '0 0 12px' }}>
-              Historial incompleto: no uses este mensaje para sancionar
+              {mensajeStale ? 'No se pudo actualizar: no uses este mensaje para sancionar' : d.mensaje_cierre_aviso}
             </p>
           )}
-          <textarea ref={mensajeRef} readOnly value={d.mensaje_cierre} aria-label="Mensaje de cierre"
+          <textarea ref={mensajeRef} readOnly value={mensajeStale ? '' : d.mensaje_cierre} aria-label="Mensaje de cierre"
             rows={Math.min(18, d.mensaje_cierre.split('\n').length + 1)}
             style={{ width: '100%', boxSizing: 'border-box', background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: 12, font: 'inherit', fontSize: 14, lineHeight: 1.45, resize: 'vertical', whiteSpace: 'pre' }} />
         </section>
