@@ -14,17 +14,14 @@
  * Se usa el PRIMERO de esos mensajes del partido (si se re-cierra, manda el original).
  *   Ej. 19-oct: cerrado el 20-oct 10:43:40 CLT; Robert pagó 10:44 → pagó tarde.
  *
- * Si el partido todavía no se cierra, el cierre está pendiente: nadie paga tarde.
- * Si el partido figura cerrado/completado pero no hay mensaje match_closed
- * (cierre hecho por otra vía), se usa CIERRE_SIN_EVENTO = inicio del partido
- * (fecha + hora en America/Santiago): conservador, marca tarde y no perdona.
+ * Si no hay mensaje match_closed, no hay corte de «tarde»: no se usa el pitazo
+ * como reemplazo. Cualquier pago encontrado cuenta a tiempo («mientras no se
+ * cierre no es tarde»). Vale igual para la sanción y para el mensaje de cierre.
  *
  * Borde: un pago aprobado EXACTAMENTE en el instante del cierre cuenta a tiempo
  * (tarde = estrictamente después). Se comparan instantes, no textos: MP devuelve
  * fechas en -04:00 y Chile está en -03:00 en verano.
  */
-import { santiagoAUtc } from './tiempo';
-
 export type FuenteCierre = 'match_closed' | 'inicio_partido' | 'pendiente';
 
 export interface CierrePago {
@@ -33,24 +30,16 @@ export interface CierrePago {
   fuente: FuenteCierre;
 }
 
-/** Default documentado cuando el partido está cerrado pero no hay evento match_closed. */
-export const CIERRE_SIN_EVENTO = 'inicio_partido' as const;
-
-const CERRADO = (phase: string | null, status: string | null) => phase === 'closed' || status === 'completed';
-
 /**
  * Cierre de pago de un partido.
  * @param eventoCerrado created_at del primer mensaje match_closed del partido (o null)
  */
 export function cierrePago(
-  m: { date: string; time: string | null; phase: string | null; status: string | null },
+  _m: { date: string; time: string | null; phase: string | null; status: string | null },
   eventoCerrado: string | null,
 ): CierrePago {
   if (eventoCerrado && !Number.isNaN(Date.parse(eventoCerrado))) {
     return { en: new Date(eventoCerrado).toISOString(), fuente: 'match_closed' };
-  }
-  if (CERRADO(m.phase, m.status)) {
-    return { en: santiagoAUtc(m.date.slice(0, 10), m.time).toISOString(), fuente: CIERRE_SIN_EVENTO };
   }
   return { en: null, fuente: 'pendiente' };
 }

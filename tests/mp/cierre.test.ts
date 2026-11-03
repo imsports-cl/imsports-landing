@@ -5,7 +5,7 @@
 import './_guard';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cierrePago, esPagoTarde, fechaHoraClt, CIERRE_SIN_EVENTO } from '../../lib/mp/cierre';
+import { cierrePago, esPagoTarde, fechaHoraClt } from '../../lib/mp/cierre';
 import { cruzarPagos } from '../../lib/mp/cruce';
 import { aPagoMp, esPagoDePichanga, type PagoMpRaw } from '../../lib/mp/pagos-mp';
 import { estadoPagos, sancionarNoPago, type Deps } from '../../lib/mp/servicio';
@@ -31,10 +31,19 @@ test('cierre: partido sin cerrar → pendiente (nadie paga tarde todavía)', () 
   assert.equal(esPagoTarde('2026-10-25T12:00:00Z', null), false);
 });
 
-test('cierre: cerrado sin mensaje match_closed → default inicio del partido en hora de Chile', () => {
-  assert.equal(CIERRE_SIN_EVENTO, 'inicio_partido');
+test('sin mensaje de cierre, un pago después del pitazo es pagado', () => {
   const c = cierrePago({ ...MATCH, phase: 'closed', status: 'completed' }, null);
-  assert.deepEqual(c, { en: '2026-10-19T23:00:00.000Z', fuente: 'inicio_partido' }); // 20:00 CLT (-03)
+  assert.deepEqual(c, { en: null, fuente: 'pendiente' });
+  // 20:30 CLT, media hora después del pitazo de las 20:00.
+  assert.equal(esPagoTarde('2026-10-19T23:30:00.000Z', c.en), false);
+});
+
+test('cierre a las 22:00: 21:59 es pagado y 22:05 es pagado tarde', () => {
+  // 22:00 CLT del 19-oct (UTC-3) = 01:00Z del 20-oct.
+  const c = cierrePago({ ...MATCH, phase: 'closed', status: 'completed' }, '2026-10-20T01:00:00.000Z');
+  assert.equal(c.fuente, 'match_closed');
+  assert.equal(esPagoTarde('2026-10-20T00:59:00.000Z', c.en), false);
+  assert.equal(esPagoTarde('2026-10-20T01:05:00.000Z', c.en), true);
 });
 
 // ---- a tiempo / tarde / borde / zona horaria ----
@@ -61,11 +70,10 @@ test('zona horaria: compara instantes, no textos (MP -04:00 vs Chile -03:00)', (
   assert.equal(esPagoTarde('2026-10-20T09:44:00.000-04:00', '2026-10-20T10:43:40.127-03:00'), true);
   // 10:43 en -04:00 = 11:43 CLT → tarde, aunque el texto sea igual a la hora del cierre
   assert.equal(esPagoTarde('2026-10-20T10:43:00.000-04:00', '2026-10-20T10:43:40.127-03:00'), true);
-  // Invierno (Chile en -04:00): partido 6-jul 20:00 → cierre por defecto 7-jul 00:00Z
+  // Sin mensaje de cierre no hay corte, ni en invierno.
   const inv = cierrePago({ date: '2026-07-06T00:00:00+00:00', time: '20:00', phase: 'closed', status: 'completed' }, null);
-  assert.equal(inv.en, '2026-07-07T00:00:00.000Z');
-  assert.equal(esPagoTarde('2026-07-06T19:59:59.000-04:00', inv.en), false);
-  assert.equal(esPagoTarde('2026-07-06T20:00:01.000-04:00', inv.en), true);
+  assert.equal(inv.en, null);
+  assert.equal(esPagoTarde('2026-07-06T20:00:01.000-04:00', inv.en), false);
 });
 
 test('fecha/hora del pago se muestra en CLT', () => {
@@ -145,6 +153,39 @@ test('servicio: Robert sale «pagó tarde», con el cierre del partido, y su san
   assert.equal(db.inserts.length, 0, 'el GET no escribe en player_sanctions');
   assert.equal(db.sanciones.length, 1);
   assert.deepEqual(db.sanciones[0], sanc, 'ni la borra ni la modifica');
+});
+
+test('servicio: sin cierre el pago posterior al pitazo es a tiempo; con cierre 22:00, 22:05 es tarde', async () => {
+  const nico = titularesQuePagan[0];
+  const armar = (cierres: Record<string, string>, fecha: string) => {
+    const pago = { ...PAGO_ROBERT_TARDE, id: 8801, date_approved: fecha, payer: { ...PAGO_ROBERT_TARDE.payer, email: nico.email, first_name: 'NICO', last_name: 'SOTO' } };
+    const db = fakeRepo({
+      partidos: [{ ...MATCH, phase: 'closed', status: 'completed' }, SIGUIENTE],
+      titulares: { [MATCH.id]: [nico] },
+      cierres,
+    });
+    const d: Deps = {
+      repo: db.repo,
+      mp: { async buscarAprobados() { return [pago]; }, async pago(id) { return pago; } },
+      ahora: () => new Date('2026-10-21T15:00:00Z'),
+      noPagan: [],
+    };
+    return d;
+  };
+  const despues = '2026-10-19T23:30:00.000Z'; // 20:30 CLT, después del pitazo
+  const sin = await estadoPagos(armar({}, despues), GRUPO, MATCH.id);
+  assert.equal(sin.titulares[0].estado, 'pagado');
+  await assert.rejects(
+    sancionarNoPago(armar({}, despues), GRUPO, { match_id: MATCH.id, user_id: nico.user_id, confirmar: true }, null),
+    (e: any) => e.status === 409,
+  );
+  const aTiempo = '2026-10-20T00:59:00.000Z'; // 21:59 CLT
+  const tarde = '2026-10-20T01:05:00.000Z'; // 22:05 CLT
+  const cierre = { [MATCH.id]: '2026-10-20T01:00:00.000Z' }; // 22:00 CLT
+  assert.equal((await estadoPagos(armar(cierre, aTiempo), GRUPO, MATCH.id)).titulares[0].estado, 'pagado');
+  assert.equal((await estadoPagos(armar(cierre, tarde), GRUPO, MATCH.id)).titulares[0].estado, 'pagado_tarde');
+  const san = await sancionarNoPago(armar(cierre, tarde), GRUPO, { match_id: MATCH.id, user_id: nico.user_id, confirmar: true }, null);
+  assert.equal(san.ya_existia, false);
 });
 
 test('servicio: a quien pagó tarde se le puede cargar la sanción; a quien pagó a tiempo no', async () => {
