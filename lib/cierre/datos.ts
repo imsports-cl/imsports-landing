@@ -29,7 +29,7 @@ export async function mensajeDePagos(
   const banca: BancaCierre[] = [];
   let cuposDisponibles = true;
   try {
-    const [lineup, confs, partido, members] = await Promise.all([
+    const [lineup, confs, partido, members, sanciones] = await Promise.all([
       supabase.rpc('admin_lineup', { p_group_id: groupId, p_match_id: estado.partido.id, p_cupos: 12 }),
       supabase.from('match_confirmations')
         .select('user_id, responded_at, user:users(display_name)')
@@ -39,10 +39,13 @@ export async function mensajeDePagos(
         .order('responded_at', { ascending: true }),
       supabase.from('matches').select('starters_announced_at').eq('id', estado.partido.id).maybeSingle(),
       supabase.from('group_members').select('user_id, nickname').eq('group_id', groupId),
+      supabase.from('player_sanctions').select('user_id')
+        .eq('group_id', groupId)
+        .eq('applies_to', estado.partido.fecha),
     ]);
-    if (lineup.error || confs.error || partido.error) {
+    if (lineup.error || confs.error || partido.error || sanciones.error) {
       cuposDisponibles = false;
-      console.error('[admin/pagos] cupos', lineup.error?.code || confs.error?.code || partido.error?.code || 'error');
+      console.error('[admin/pagos] cupos', lineup.error?.code || confs.error?.code || partido.error?.code || sanciones.error?.code || 'error');
     } else {
       const rows = ((lineup.data as { cupos_asegurados?: { user_id?: string; nombre?: string; hasta?: string; manual?: boolean; es_mvp?: boolean; es_organizador?: boolean }[] } | null)?.cupos_asegurados) || [];
       for (const r of rows) {
@@ -62,6 +65,7 @@ export async function mensajeDePagos(
         if (row.nickname) nick.set(row.user_id, row.nickname);
       }
       const anunciado = partido.data?.starters_announced_at ? Date.parse(partido.data.starters_announced_at) : NaN;
+      const sancionados = new Set((sanciones.data || []).map((s) => (s as { user_id: string }).user_id));
       for (const c of confs.data || []) {
         const row = c as { user_id: string; responded_at: string | null; user?: { display_name?: string | null } | null };
         const respondio = row.responded_at ? Date.parse(row.responded_at) : NaN;
@@ -70,6 +74,7 @@ export async function mensajeDePagos(
           nombre: nick.get(row.user_id) || row.user?.display_name || 'Jugador',
           responded_at: row.responded_at || '',
           confirmo_tarde: Number.isFinite(anunciado) && Number.isFinite(respondio) && respondio > anunciado,
+          sancionado: sancionados.has(row.user_id),
         });
       }
     }

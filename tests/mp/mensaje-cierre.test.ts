@@ -183,6 +183,22 @@ test('organizador de un partido no entra ni gana 28 días', () => {
   assert.match(texto, /Asegura cupo hasta:\nNadie$/);
 });
 
+test('banca sancionada esa fecha no suma 28 días', () => {
+  const texto = textoDe({
+    titulares: [{ user_id: 'u-esteban', nombre: 'Esteban', estado: 'no_pagado' }],
+    cupos: [{ user_id: 'u-esteban', nombre: 'Esteban', hasta: '2026-12-01', manual: true }],
+    banca: [
+      { user_id: 'u-michel', nombre: 'Michel', responded_at: '2026-11-01T13:00:00Z', sancionado: true },
+      { user_id: 'u-villa', nombre: 'Villa', responded_at: '2026-11-01T14:00:00Z' },
+    ],
+    fechaPartido: '2026-11-02',
+  });
+  assert.equal(texto.includes('Michel'), false);
+  assert.equal(texto.includes('1 de diciembre'), false);
+  assert.match(texto, /Pierde cupo por no pago:\nEsteban\n/);
+  assert.match(texto, /30 de noviembre\nVilla$/);
+});
+
 test('confirmo tarde no es banca que asegura', () => {
   const texto = textoDe({
     titulares: [],

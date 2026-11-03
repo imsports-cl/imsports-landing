@@ -42,6 +42,8 @@ export interface BancaCierre {
   nombre: string;
   responded_at: string;
   confirmo_tarde?: boolean;
+  /** Sanción de esta misma fecha (player_sanctions.applies_to). No genera +28. */
+  sancionado?: boolean;
 }
 
 export type BloqueoMensaje =
@@ -214,7 +216,7 @@ function gruposAsegura(input: {
     guardar(userId, c.nombre, c.hasta, c.orden);
   }
   const banca = [...(input.banca || [])]
-    .filter((b) => !(EXCLUIR_BANCA_CONFIRMO_TARDE && b.confirmo_tarde))
+    .filter((b) => !(EXCLUIR_BANCA_CONFIRMO_TARDE && b.confirmo_tarde) && !b.sancionado)
     .sort((a, b) => a.responded_at.localeCompare(b.responded_at) || a.nombre.localeCompare(b.nombre, 'es'));
   banca.forEach((b, i) => {
     if (enPierde(b.user_id, b.nombre)) return;
