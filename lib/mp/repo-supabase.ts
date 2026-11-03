@@ -203,4 +203,40 @@ export const repoSupabase: PagosRepo = {
     const { error } = await db.from('mp_payer_aliases').delete().eq('group_id', groupId).eq('id', aliasId);
     err(error);
   },
+  async deudas(groupId) {
+    const { data, error } = await db.from('player_debts')
+      .select('id, user_id, match_id, status, mp_payment_id, match:matches(date)')
+      .eq('group_id', groupId).eq('status', 'activa');
+    if (error?.code === '42P01' || error?.code === 'PGRST205') return [];
+    err(error);
+    const ids = [...new Set((data || []).map((r: any) => r.user_id))];
+    const { data: miembros } = ids.length
+      ? await db.from('group_members').select('user_id, nickname, user:users(display_name)').eq('group_id', groupId).in('user_id', ids)
+      : { data: [] as any[] };
+    const nombre = new Map<string, string>();
+    for (const m of (miembros || []) as any[]) nombre.set(m.user_id, m.nickname || m.user?.display_name || 'Jugador');
+    return ((data || []) as any[]).map((r) => ({
+      id: r.id, user_id: r.user_id, match_id: r.match_id,
+      fecha: String(r.match?.date || '').slice(0, 10),
+      nombre: nombre.get(r.user_id) || 'Jugador',
+      status: r.status, mp_payment_id: r.mp_payment_id ?? null,
+    }));
+  },
+  async registrarDeuda(p) {
+    const { error } = await db.rpc('registrar_deuda_no_pago', {
+      p_match_id: p.match_id, p_user_id: p.user_id, p_created_by: p.created_by, p_note: null,
+    });
+    if (error?.code === 'PGRST202' || error?.code === '42883' || error?.code === '42P01') return { ok: false, omitida: true };
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    return { ok: true };
+  },
+  async saldarDeuda(p) {
+    const { data, error } = await db.rpc('saldar_deuda', {
+      p_debt_id: p.debt_id, p_via: p.via, p_settled_at: p.settled_at ?? null,
+      p_mp_payment_id: p.mp_payment_id ?? null, p_condonar: false, p_by: p.by ?? null, p_note: null,
+    });
+    if (error?.code === 'PGRST202' || error?.code === '42883' || error?.code === '42P01') return { ok: false };
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    return (data as { ok: boolean; ya_saldada?: boolean }) || { ok: true };
+  },
 };

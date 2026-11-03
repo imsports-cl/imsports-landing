@@ -8,6 +8,7 @@ import { claveNombre, cruzarPagos, identificarPago, type AliasPagador, type Resu
 import { DIAS_VENTANA, isoSantiago, santiagoAUtc, ventanaPagos } from './tiempo';
 import { normalizarEmail } from './normalizar';
 import { cierrePago, type CierrePago } from './cierre';
+import { debeRegistrarDeuda, sancionHastaPagarActiva } from './deudas';
 
 export interface Partido {
   id: string; group_id: string; date: string; time: string | null;
@@ -54,6 +55,10 @@ export interface PagosRepo {
   insertarSancion(s: Sancion & { group_id: string; created_by: string | null }): Promise<void>;
   guardarAlias(a: Omit<AliasPagador, 'id'> & { group_id: string; payer_label: string; created_by: string | null }): Promise<void>;
   borrarAlias(groupId: string, aliasId: string): Promise<void>;
+  /** Deudas de no pago (041). Vacío si la tabla todavía no existe. */
+  deudas(groupId: string): Promise<{ id: string; user_id: string; match_id: string; fecha: string; nombre: string; status: 'activa' | 'saldada' | 'condonada'; mp_payment_id: string | null }[]>;
+  registrarDeuda(p: { match_id: string; user_id: string; created_by: string | null }): Promise<{ ok: boolean; omitida?: boolean }>;
+  saldarDeuda(p: { debt_id: string; via: 'mp' | 'manual'; settled_at?: string | null; mp_payment_id?: string | null; by?: string | null }): Promise<{ ok: boolean; ya_saldada?: boolean }>;
 }
 
 export interface MpLector {
@@ -68,6 +73,11 @@ export interface Deps {
   ahora: () => Date;
   /** Correos que no pagan (admin organizador). Se comparan en minúsculas. */
   noPagan: string[];
+  /**
+   * Sanción hasta pagar (041). Si no viene, se lee SANCION_HASTA_PAGAR.
+   * Apagado: no se llama registrar_deuda_no_pago.
+   */
+  sancionHastaPagar?: boolean;
 }
 
 export class ErrorPagos extends Error {
@@ -484,8 +494,22 @@ export async function sancionarNoPago(
 
   const applies_to = await fechaSancion(deps.repo, m);
   const previa = (await deps.repo.sanciones(groupId, applies_to)).find((s) => s.user_id === jugador.user_id);
+  const anotarDeuda = async () => {
+    const activa = deps.sancionHastaPagar ?? sancionHastaPagarActiva();
+    if (!debeRegistrarDeuda({ activa, estado, partidoEmpezo: true })) return;
+    try {
+      await deps.repo.registrarDeuda({ match_id: m.id, user_id: jugador.user_id, created_by: adminId });
+    } catch (e: any) {
+      // La migración 041 puede no estar aplicada: la sanción de una fecha igual queda.
+      if (e?.code === 'PGRST202' || e?.code === '42883' || e?.code === '42P01') return;
+      throw e;
+    }
+  };
   if (previa) {
-    if (previa.reason === 'no_pago') return { ok: true, ya_existia: true, applies_to };
+    if (previa.reason === 'no_pago') {
+      await anotarDeuda();
+      return { ok: true, ya_existia: true, applies_to };
+    }
     throw new ErrorPagos(`ya tiene otra sanción (${previa.reason}) para el ${applies_to}`, 409);
   }
   try {
@@ -494,8 +518,12 @@ export async function sancionarNoPago(
       note: `No pagó la pichanga del ${ymd(m.date)} (match ${m.id})`, created_by: adminId,
     });
   } catch (e: any) {
-    if (e?.code === '23505') return { ok: true, ya_existia: true, applies_to }; // carrera: otro clic
+    if (e?.code === '23505') {
+      await anotarDeuda();
+      return { ok: true, ya_existia: true, applies_to }; // carrera: otro clic
+    }
     throw e;
   }
+  await anotarDeuda();
   return { ok: true, ya_existia: false, applies_to };
 }

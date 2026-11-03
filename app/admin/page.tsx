@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Novedades from './Novedades';
 import Pagos from './Pagos';
+import { CONFIRMACION_MARCAR_PAGADO, textoFechasPendientes } from '../../lib/cierre/fechas';
+import { copiaReglasAdmin, type Fragmento } from './copia-reglas';
 import { createClient, type Session } from '@supabase/supabase-js';
 
 const supa = createClient(
@@ -24,10 +26,10 @@ interface LineupPlayer {
   user_id: string; nombre: string; pj: number; orden: number; pos: number;
   titular: boolean; asegurado: boolean; es_mvp: boolean; es_organizador: boolean;
   sancionado: boolean; sancion_motivo: string | null; neteado: boolean;
-  confirmo_tarde: boolean; cupo_caducado: boolean;
+  confirmo_tarde: boolean; cupo_caducado: boolean; deuda_pendiente?: boolean; fechas_pendientes?: number;
   asegura_hasta: string | null; confirmo_at: string | null;
 }
-interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean; neteado: boolean }
+interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean; neteado: boolean; fecha_deuda?: string | null; deuda_match_id?: string | null; fechas_pendientes?: number }
 interface CupoRow { user_id: string; nombre: string; hasta: string; es_mvp: boolean; es_organizador: boolean; manual: boolean; }
 interface Lineup {
   match: { id: string; fecha: string; hora: string | null; lugar: string | null; fase: string; cupos: number; organizador: string | null };
@@ -41,6 +43,7 @@ interface Lineup {
 }
 const MOTIVOS: Record<string, string> = {
   no_pago: '💸 No pagó a tiempo',
+  deuda_no_pago: '💸 Debe una pichanga · hasta que pague',
   atraso: '⏰ Llegó tarde',
   bajo_tarde: '🚪 Se bajó pasadas las 13:00',
 };
@@ -48,6 +51,18 @@ interface Miembro { user_id: string; nombre: string }
 interface PanelData {
   fechas: string[]; ranking: RankRow[]; ultimas12_confirmacion?: ConfRow[];
   registrados: RegRow[]; lineup: Lineup; miembros: Miembro[];
+  /** Lo manda /admin/api. Apagado: los textos de ayuda quedan como en prod. */
+  sancion_hasta_pagar?: boolean;
+}
+
+function Trozos({ partes, color }: { partes: Fragmento[]; color?: string }) {
+  return (
+    <>
+      {partes.map((p, i) =>
+        p.fuerte ? <b key={i} style={color ? { color } : undefined}>{p.texto}</b> : p.texto,
+      )}
+    </>
+  );
 }
 
 /** Fecha corta legible: 2026-09-28 → "28 sep" */
@@ -130,6 +145,19 @@ export default function AdminPage() {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion, user_id, hasta, reason }),
+      });
+      await cargar(session.access_token);
+    } finally { setBusy(false); }
+  };
+  // 041: saldar a mano (efectivo/transferencia). El saldo por MP lo hace la conciliación.
+  const saldarDeuda = async (user_id: string) => {
+    if (!session || !confirm(CONFIRMACION_MARCAR_PAGADO)) return;
+    setBusy(true);
+    try {
+      await fetch('/admin/api/pagos', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'saldar_deuda', user_id }),
       });
       await cargar(session.access_token);
     } finally { setBusy(false); }
@@ -275,12 +303,13 @@ export default function AdminPage() {
 
             {tab === 'titulares' && data.lineup && (() => {
               const L = data.lineup;
+              const reglas = copiaReglasAdmin(Boolean(data.sancion_hasta_pagar));
               const titulares = L.jugadores.filter((j) => j.titular);
               const banca = L.jugadores.filter((j) => !j.titular);
               const comoEntra = (j: LineupPlayer) =>
                 j.confirmo_tarde ? '🕐 Confirmó tras el anuncio · va al final'
-                : j.neteado ? `⚖️ Netea · aseguraba y perdió cupo → entra por puntaje`
-                : j.sancionado ? `⛔ Pierde cupo · ${MOTIVOS[j.sancion_motivo || ''] || j.sancion_motivo}`
+                : j.neteado ? `⚖️ Netea · aseguraba y perdió cupo${j.deuda_pendiente ? ' (debe una pichanga)' : ''} → entra por puntaje`
+                : j.sancionado ? `⛔ Pierde cupo · ${MOTIVOS[j.sancion_motivo || ''] || j.sancion_motivo}${(j.fechas_pendientes ?? 0) > 0 ? ` · ${textoFechasPendientes(j.fechas_pendientes!)}` : ''}`
                 : j.es_mvp ? '🌟 MVP fecha pasada'
                 : j.es_organizador ? '🎩 Organizador'
                 : j.asegurado ? `🪑 Banca · asegura hasta ${fechaCorta(j.asegura_hasta)}`
@@ -438,6 +467,7 @@ export default function AdminPage() {
                     <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>🎟️ Cupos asegurados vigentes</h3>
                     <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
                       Detectados automáticamente de la banca (4 fechas). Puedes cambiar la fecha o quitarlos.
+                      {reglas.cuposExtra && <> {reglas.cuposExtra}</>}
                     </p>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <tbody>
@@ -487,8 +517,7 @@ export default function AdminPage() {
                   <section style={{ ...box, marginTop: 16 }}>
                     <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>⛔ Pierden cupo esta fecha</h3>
                     <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
-                      Por no pagar a tiempo o llegar tarde. Quedan al final de la lista (sin puntos) y entre
-                      ellos ordena la hora de confirmación. Si hay cupo igual juegan. Dura solo esta fecha.
+                      <Trozos partes={reglas.introPierde} />
                       <br />
                       <b style={{ color: '#F6C453' }}>⚖️ Netea:</b> si el sancionado ya aseguraba cupo (MVP,
                       organizador o banca), se anulan y entra por puntaje normal.
@@ -505,13 +534,22 @@ export default function AdminPage() {
                               <td style={{ ...td, color: S.dim, fontSize: 13 }}>
                                 {MOTIVOS[s.motivo] || s.motivo}
                                 {s.neteado && <span style={{ color: '#F6C453' }}> · ⚖️ netea (aseguraba cupo)</span>}
+                                {s.motivo === 'deuda_no_pago' && s.fecha_deuda && ` · debe la del ${fechaCorta(s.fecha_deuda)}`}
+                                {(s.fechas_pendientes ?? 0) > 0 && ` · ${textoFechasPendientes(s.fechas_pendientes!)}`}
                                 {!s.confirmo && ' · no ha confirmado'}
                               </td>
                               <td style={{ ...td, textAlign: 'right' }}>
+                                {s.motivo === 'deuda_no_pago' ? (
+                                  <button onClick={() => saldarDeuda(s.user_id)} disabled={busy}
+                                    style={{ background: 'none', border: `1px solid ${S.border}`, color: S.accent, borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+                                    Marcar pagado
+                                  </button>
+                                ) : (
                                 <button onClick={() => mutarCupo('quitar_sancion', s.user_id, L.match.fecha)} disabled={busy}
                                   style={{ background: 'none', border: `1px solid ${S.border}`, color: S.accent, borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
                                   Perdonar
                                 </button>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -584,17 +622,16 @@ export default function AdminPage() {
                         <li>Lo mismo si lo bajas y después lo reincorporas desde este panel.</li>
                       </ul>
 
-                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>⛔ Pierde cupo (dura una fecha)</p>
+                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>{reglas.tituloPierde}</p>
                       <ul style={{ paddingLeft: 20, margin: '0 0 18px', color: S.dim }}>
-                        <li>💸 No pagó a tiempo · ⏰ Llegó tarde · 🚪 Se bajó pasadas las 13:00.</li>
-                        <li>Queda al <b style={{ color: S.text }}>final de la lista y sin puntos</b>; entre sancionados ordena la hora de confirmación.</li>
-                        <li>Si igual sobra cupo, juega: solo baja de prioridad.</li>
+                        {reglas.reglasPierde.map((item, i) => (
+                          <li key={i}><Trozos partes={item} color={S.text} /></li>
+                        ))}
                       </ul>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#F6C453' }}>⚖️ Neteo</p>
                       <p style={{ margin: '0 0 18px', color: S.dim }}>
-                        Si alguien <b style={{ color: S.text }}>asegura cupo y lo pierde</b> en la misma fecha, se anulan:
-                        entra por la regla de puntajes, conservando sus confirmaciones.
+                        <Trozos partes={reglas.neteo} color={S.text} />
                       </p>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700 }}>🚪 Bajarse</p>

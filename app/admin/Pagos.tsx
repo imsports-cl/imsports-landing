@@ -7,6 +7,7 @@
  * la sanción) · ❌ no pagó. Esta pestaña nunca quita ni perdona sanciones.
  */
 import { useEffect, useRef, useState } from 'react';
+import { CONFIRMACION_MARCAR_PAGADO, textoFechasPendientes } from '../../lib/cierre/fechas';
 import { DIAS_VENTANA, horaClt } from '../../lib/mp/tiempo';
 
 const S = {
@@ -34,6 +35,10 @@ interface Datos {
   mensaje_cierre_aviso?: string | null;
   bloqueo?: 'historial_incompleto' | 'mp_no_configurado' | 'mp_incompleto' | 'cupos_no_disponibles' | 'sin_certeza' | null;
   sin_cierre?: boolean;
+  /** 041. Apagado: no hay deudas en la respuesta. */
+  sancion_hasta_pagar?: boolean;
+  deudas?: { id: string; user_id: string; fecha: string; nombre: string; status: string }[];
+  fechas_pendientes?: { user_id: string; nombre: string; fechas: number }[];
   alias: { id: string; jugador: string; pagador: string }[];
   miembros: { user_id: string; nombre: string }[];
 }
@@ -147,6 +152,23 @@ export default function Pagos({ token }: { token: string }) {
     }
     setCopiado(true);
     window.setTimeout(() => setCopiado(false), 2000);
+  };
+
+  const marcarPagado = async (userId: string) => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(CONFIRMACION_MARCAR_PAGADO)) return;
+    await post({ accion: 'saldar_deuda', user_id: userId }, `deuda-${userId}`);
+  };
+
+  const conciliarDeudas = async () => {
+    const j = await post({ accion: 'conciliar_deudas' }, 'conciliar');
+    if (!j || j.omitido) return;
+    const n = Array.isArray(j.saldadas) ? j.saldadas.length : 0;
+    const sin = Array.isArray(j.sin_mapear) ? j.sin_mapear.length : 0;
+    const aviso = n
+      ? `Se marcaron pagadas ${n} deuda${n === 1 ? '' : 's'} con el pago de Mercado Pago.`
+      : 'Ningún pago de Mercado Pago calzó con una deuda.';
+    alert(sin ? `${aviso}\n${sin} sigue${sin === 1 ? '' : 'n'} sin saldar (no calzó alias, correo ni nombre).` : aviso);
   };
 
   const copiarMensaje = async () => {
@@ -263,6 +285,46 @@ export default function Pagos({ token }: { token: string }) {
           <textarea ref={mensajeRef} readOnly value={mensajeStale ? '' : d.mensaje_cierre} aria-label="Mensaje de cierre"
             rows={Math.min(18, d.mensaje_cierre.split('\n').length + 1)}
             style={{ width: '100%', boxSizing: 'border-box', background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: 12, font: 'inherit', fontSize: 14, lineHeight: 1.45, resize: 'vertical', whiteSpace: 'pre' }} />
+        </section>
+      )}
+
+      {d.sancion_hasta_pagar && (
+        <section style={box}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>💸 Deudas de no pago</h3>
+            <button type="button" onClick={conciliarDeudas} disabled={busy !== null || !d.configurado} style={btn(S.accent)}>
+              {busy === 'conciliar' ? 'Conciliando…' : 'Conciliar deudas'}
+            </button>
+          </div>
+          <p style={{ color: S.dim, fontSize: 13, margin: '0 0 12px' }}>
+            💸 Debe una pichanga · hasta que pague. Conciliar busca pagos aprobados desde la fecha del partido impago hasta hoy.
+          </p>
+          {(d.deudas || []).length === 0 ? (
+            <p style={{ color: S.dim, fontSize: 13, margin: 0 }}>Nadie con deuda activa.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                {(d.deudas || []).map((deuda) => {
+                  const pendientes = (d.fechas_pendientes || []).find((f) => f.user_id === deuda.user_id)?.fechas ?? 0;
+                  return (
+                  <tr key={deuda.id}>
+                    <td style={{ ...td, fontWeight: 700 }}>{deuda.nombre}</td>
+                    <td style={{ ...td, color: S.dim, fontSize: 13 }}>
+                      💸 Debe una pichanga · hasta que pague · debe la del {fechaCorta(deuda.fecha)}
+                      {pendientes > 0 && <> · {textoFechasPendientes(pendientes)}</>}
+                    </td>
+                    <td style={{ ...td, textAlign: 'right' }}>
+                      <button type="button" onClick={() => marcarPagado(deuda.user_id)} disabled={busy !== null}
+                        style={{ background: 'none', border: `1px solid ${S.border}`, color: S.accent, borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+                        Marcar pagado
+                      </button>
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </section>
       )}
 
