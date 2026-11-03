@@ -70,6 +70,9 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
       aliases.push({ ...a, id: `a-${aliases.length + 1}` });
     },
     async borrarAlias(g, id) { const i = aliases.findIndex((a) => a.group_id === g && a.id === id); if (i >= 0) aliases.splice(i, 1); },
+    async deudas() { return []; },
+    async registrarDeuda() { return { ok: true }; },
+    async saldarDeuda() { return { ok: true }; },
   };
   return { repo, sanciones, aliases, inserts };
 }

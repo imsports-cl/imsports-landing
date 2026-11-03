@@ -24,6 +24,7 @@ export async function mensajeDePagos(
     titulares: TitularCierre[];
   },
   groupId: string,
+  extra?: { deudas?: { user_id: string; nombre: string; fecha: string }[]; sancionHastaPagar?: boolean },
 ) {
   const cupos: CupoAsegurado[] = [];
   const banca: BancaCierre[] = [];
@@ -93,6 +94,8 @@ export async function mensajeDePagos(
     mpIncompleto: estado.mp_incompleto,
     partidoEmpezo,
     cuposDisponibles,
+    deudas: extra?.deudas,
+    sancionHastaPagar: extra?.sancionHastaPagar,
   });
   return {
     mensaje_cierre: listo.texto,

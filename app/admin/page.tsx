@@ -24,10 +24,10 @@ interface LineupPlayer {
   user_id: string; nombre: string; pj: number; orden: number; pos: number;
   titular: boolean; asegurado: boolean; es_mvp: boolean; es_organizador: boolean;
   sancionado: boolean; sancion_motivo: string | null; neteado: boolean;
-  confirmo_tarde: boolean; cupo_caducado: boolean;
+  confirmo_tarde: boolean; cupo_caducado: boolean; deuda_pendiente?: boolean;
   asegura_hasta: string | null; confirmo_at: string | null;
 }
-interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean; neteado: boolean }
+interface SancionRow { user_id: string; nombre: string; motivo: string; confirmo: boolean; neteado: boolean; fecha_deuda?: string | null; deuda_match_id?: string | null }
 interface CupoRow { user_id: string; nombre: string; hasta: string; es_mvp: boolean; es_organizador: boolean; manual: boolean; }
 interface Lineup {
   match: { id: string; fecha: string; hora: string | null; lugar: string | null; fase: string; cupos: number; organizador: string | null };
@@ -41,6 +41,7 @@ interface Lineup {
 }
 const MOTIVOS: Record<string, string> = {
   no_pago: '💸 No pagó a tiempo',
+  deuda_no_pago: '💸 Debe una pichanga · hasta que pague',
   atraso: '⏰ Llegó tarde',
   bajo_tarde: '🚪 Se bajó pasadas las 13:00',
 };
@@ -130,6 +131,19 @@ export default function AdminPage() {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ accion, user_id, hasta, reason }),
+      });
+      await cargar(session.access_token);
+    } finally { setBusy(false); }
+  };
+  // 041: saldar a mano (efectivo/transferencia). El saldo por MP lo hace la conciliación.
+  const saldarDeuda = async (user_id: string) => {
+    if (!session || !confirm('¿Marcar la deuda como pagada? Desde la próxima fecha deja de perder cupo.')) return;
+    setBusy(true);
+    try {
+      await fetch('/admin/api/pagos', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'saldar_deuda', user_id }),
       });
       await cargar(session.access_token);
     } finally { setBusy(false); }
@@ -279,7 +293,7 @@ export default function AdminPage() {
               const banca = L.jugadores.filter((j) => !j.titular);
               const comoEntra = (j: LineupPlayer) =>
                 j.confirmo_tarde ? '🕐 Confirmó tras el anuncio · va al final'
-                : j.neteado ? `⚖️ Netea · aseguraba y perdió cupo → entra por puntaje`
+                : j.neteado ? `⚖️ Netea · aseguraba y perdió cupo${j.deuda_pendiente ? ' (debe una pichanga)' : ''} → entra por puntaje`
                 : j.sancionado ? `⛔ Pierde cupo · ${MOTIVOS[j.sancion_motivo || ''] || j.sancion_motivo}`
                 : j.es_mvp ? '🌟 MVP fecha pasada'
                 : j.es_organizador ? '🎩 Organizador'
@@ -402,7 +416,8 @@ export default function AdminPage() {
                       </div>
                     )}
                     <p style={{ color: S.dim, fontSize: 12, marginBottom: 0, marginTop: 12 }}>
-                      Los que queden en banca aseguran cupo las próximas 4 fechas (se agregan solos al cerrar el partido),
+                      Los que queden en banca aseguran cupo las próximas <b>4 fechas</b> (4 lunes = 28 días desde esta fecha;
+                      se agregan solos al cerrar el partido),
                       salvo quien haya confirmado <b>después</b> de anunciados los titulares: juega si hay cupo, pero no asegura.
                       A quien ya traía cupo vigente <b>no se le corre la fecha</b>: mantiene la que tenía.
                       Si alguien avisó que no va, usa <b>“Se bajó”</b> — así no queda como banca ni asegura cupo.
@@ -437,7 +452,8 @@ export default function AdminPage() {
                   <section style={box}>
                     <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>🎟️ Cupos asegurados vigentes</h3>
                     <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
-                      Detectados automáticamente de la banca (4 fechas). Puedes cambiar la fecha o quitarlos.
+                      Detectados automáticamente de la banca (4 fechas = 28 días desde la banca). Puedes cambiar la fecha o quitarlos.
+                      Quien debe una pichanga mantiene la fecha, pero mientras no pague su cupo se netea.
                     </p>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <tbody>
@@ -487,8 +503,10 @@ export default function AdminPage() {
                   <section style={{ ...box, marginTop: 16 }}>
                     <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>⛔ Pierden cupo esta fecha</h3>
                     <p style={{ color: S.dim, fontSize: 13, marginTop: 0 }}>
-                      Por no pagar a tiempo o llegar tarde. Quedan al final de la lista (sin puntos) y entre
-                      ellos ordena la hora de confirmación. Si hay cupo igual juegan. Dura solo esta fecha.
+                      Por no pagar a tiempo, llegar tarde o bajarse pasadas las 13:00. Quedan al final de la lista (sin puntos) y entre
+                      ellos ordena la hora de confirmación. Si hay cupo igual juegan. Llegar tarde y bajarse tarde duran
+                      solo esta fecha; <b>no pagar dura hasta que pague</b> (se levanta sola al conciliar el pago en Mercado Pago,
+                      o con <b>“Marcar pagado”</b>).
                       <br />
                       <b style={{ color: '#F6C453' }}>⚖️ Netea:</b> si el sancionado ya aseguraba cupo (MVP,
                       organizador o banca), se anulan y entra por puntaje normal.
@@ -505,13 +523,21 @@ export default function AdminPage() {
                               <td style={{ ...td, color: S.dim, fontSize: 13 }}>
                                 {MOTIVOS[s.motivo] || s.motivo}
                                 {s.neteado && <span style={{ color: '#F6C453' }}> · ⚖️ netea (aseguraba cupo)</span>}
+                                {s.motivo === 'deuda_no_pago' && s.fecha_deuda && ` · debe la del ${fechaCorta(s.fecha_deuda)}`}
                                 {!s.confirmo && ' · no ha confirmado'}
                               </td>
                               <td style={{ ...td, textAlign: 'right' }}>
+                                {s.motivo === 'deuda_no_pago' ? (
+                                  <button onClick={() => saldarDeuda(s.user_id)} disabled={busy}
+                                    style={{ background: 'none', border: `1px solid ${S.border}`, color: S.accent, borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+                                    Marcar pagado
+                                  </button>
+                                ) : (
                                 <button onClick={() => mutarCupo('quitar_sancion', s.user_id, L.match.fecha)} disabled={busy}
                                   style={{ background: 'none', border: `1px solid ${S.border}`, color: S.accent, borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
                                   Perdonar
                                 </button>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -552,7 +578,8 @@ export default function AdminPage() {
                         <li><b style={{ color: S.accent }}>🌟 MVP de la fecha pasada</b> — solo para la fecha siguiente.</li>
                         <li><b style={{ color: S.accent }}>🎩 Organizador</b> — quien creó el partido, solo esa fecha.</li>
                         <li>
-                          <b style={{ color: S.accent }}>🪑 Los que quedaron en banca</b> — aseguran las <b>4 fechas siguientes</b>,
+                          <b style={{ color: S.accent }}>🪑 Los que quedaron en banca</b> — aseguran las <b>4 fechas siguientes</b>
+                          (4 pichangas semanales: 28 días contados desde la fecha en que quedó en banca),
                           y el cupo se mantiene aunque alcancen a jugar antes. Volver a quedar en banca
                           con el cupo <b style={{ color: S.text }}>todavía vigente no corre la fecha</b>: se conserva la
                           original. Solo arranca un nuevo período si queda en banca cuando el anterior ya venció.
@@ -584,9 +611,18 @@ export default function AdminPage() {
                         <li>Lo mismo si lo bajas y después lo reincorporas desde este panel.</li>
                       </ul>
 
-                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>⛔ Pierde cupo (dura una fecha)</p>
+                      <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#FF8A8A' }}>⛔ Pierde cupo</p>
                       <ul style={{ paddingLeft: 20, margin: '0 0 18px', color: S.dim }}>
-                        <li>💸 No pagó a tiempo · ⏰ Llegó tarde · 🚪 Se bajó pasadas las 13:00.</li>
+                        <li>⏰ Llegó tarde · 🚪 Se bajó pasadas las 13:00 → <b style={{ color: S.text }}>dura una fecha</b> (la siguiente).</li>
+                        <li>
+                          💸 No pagó → <b style={{ color: S.text }}>dura hasta que pague</b>: desde la fecha siguiente y en todas
+                          las que vengan mientras la deuda siga pendiente. Pagar tarde no salva la fecha siguiente.
+                        </li>
+                        <li>
+                          <b style={{ color: S.text }}>Plazo para pagar:</b> hasta que se cierre la pichanga. Mientras no se
+                          cierre, no es tarde; al cerrar, el que no ha pagado queda sancionado.
+                        </li>
+                        <li>La deuda se salda sola al conciliar el pago en Mercado Pago, o el admin la marca pagada (efectivo/transferencia).</li>
                         <li>Queda al <b style={{ color: S.text }}>final de la lista y sin puntos</b>; entre sancionados ordena la hora de confirmación.</li>
                         <li>Si igual sobra cupo, juega: solo baja de prioridad.</li>
                       </ul>
@@ -594,7 +630,9 @@ export default function AdminPage() {
                       <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#F6C453' }}>⚖️ Neteo</p>
                       <p style={{ margin: '0 0 18px', color: S.dim }}>
                         Si alguien <b style={{ color: S.text }}>asegura cupo y lo pierde</b> en la misma fecha, se anulan:
-                        entra por la regla de puntajes, conservando sus confirmaciones.
+                        entra por la regla de puntajes, conservando sus confirmaciones. Con una deuda pendiente esto
+                        pasa en <b style={{ color: S.text }}>cada fecha hasta que pague</b> y con cualquier cupo (MVP, organizador o banca);
+                        el cupo no se pierde, sigue corriendo hasta su vencimiento.
                       </p>
 
                       <p style={{ margin: '0 0 6px', fontWeight: 700 }}>🚪 Bajarse</p>

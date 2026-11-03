@@ -105,6 +105,9 @@ export function mensajeCierre(input: {
   cupos: CupoAsegurado[];
   /** Banca de esta pichanga, ya en orden de confirmación. */
   banca?: BancaCierre[];
+  /** Deudas activas de pichangas anteriores. Solo cuentan con sancionHastaPagar. */
+  deudas?: { user_id: string; nombre: string; fecha: string }[];
+  sancionHastaPagar?: boolean;
   futuros?: FechaFutura[];
   /** YYYY-MM-DD de la pichanga que se cierra. */
   fechaPartido: string;
@@ -121,11 +124,16 @@ export function mensajeCierre(input: {
   const partidoEmpezo = input.partidoEmpezo !== false;
   const cuposDisponibles = input.cuposDisponibles !== false;
   const sancionables = input.titulares.filter((t) => sancionable(t, { configurado, historialIncompleto, partidoEmpezo }));
+  const deudas = deudasAnteriores(input);
+  for (const d of [...deudas].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.nombre.localeCompare(b.nombre, 'es'))) {
+    if (sancionables.some((t) => t.user_id === d.user_id)) continue;
+    sancionables.push({ user_id: d.user_id, nombre: d.nombre, estado: 'no_pagado' });
+  }
   const pagosConfiables = configurado && !historialIncompleto && !mpIncompleto && partidoEmpezo;
   const hayDuda = input.titulares.some((t) => t.estado !== 'pagado' && !sancionable(t, { configurado, historialIncompleto, partidoEmpezo }));
   const bloqueo = bloqueoMensaje({ historialIncompleto, configurado, mpIncompleto, cuposDisponibles, partidoEmpezo, hayDuda });
   const aviso = textoBloqueo(bloqueo);
-  const lineas = ['Pierde cupo por no pago:'];
+  const lineas = [input.sancionHastaPagar ? 'Pierde cupo por no pago (hasta que pague):' : 'Pierde cupo por no pago:'];
   if (sancionables.length) lineas.push(sancionables.map((t) => t.nombre).join(', '));
   else if (pagosConfiables && !hayDuda) lineas.push('Nadie');
   lineas.push('', 'Asegura cupo hasta:');
@@ -133,6 +141,17 @@ export function mensajeCierre(input: {
   if (cuposDisponibles && !grupos.length) lineas.push('Nadie');
   else for (const g of grupos) lineas.push(fechaMensaje(g.fecha), g.nombres.join(', '));
   return { texto: lineas.join('\n'), bloqueado: bloqueo != null, aviso, bloqueo };
+}
+
+/** Deudas de pichangas anteriores a la que se cierra. El cupo no se borra: solo se netea en el texto. */
+function deudasAnteriores(input: {
+  deudas?: { user_id: string; nombre: string; fecha: string }[];
+  sancionHastaPagar?: boolean;
+  fechaPartido: string;
+}) {
+  if (!input.sancionHastaPagar) return [];
+  const hoy = diaCalendario(input.fechaPartido);
+  return (input.deudas || []).filter((d) => d.fecha && diaCalendario(d.fecha) < hoy);
 }
 
 function sancionable(t: TitularCierre, ctx: { configurado: boolean; historialIncompleto: boolean; partidoEmpezo: boolean }): boolean {
@@ -185,11 +204,14 @@ function gruposAsegura(input: {
   cupos: CupoAsegurado[];
   banca?: BancaCierre[];
   fechaPartido: string;
+  deudas?: { user_id: string; nombre: string; fecha: string }[];
+  sancionHastaPagar?: boolean;
 }): { fecha: string; nombres: string[] }[] {
   const hoy = diaCalendario(input.fechaPartido);
   const pierdeId = new Set(input.titulares.filter((t) => t.estado !== 'pagado' && t.user_id).map((t) => t.user_id as string));
   const pierdeNombre = new Set(input.titulares.filter((t) => t.estado !== 'pagado').map((t) => t.nombre));
-  const enPierde = (userId: string, nombre: string) => pierdeId.has(userId) || pierdeNombre.has(nombre);
+  const deudaId = new Set(deudasAnteriores(input).map((d) => d.user_id));
+  const enPierde = (userId: string, nombre: string) => pierdeId.has(userId) || pierdeNombre.has(nombre) || deudaId.has(userId);
   const previo = new Map<string, CupoAsegurado & { hasta: string; orden: number }>();
   input.cupos.forEach((c, i) => {
     const hasta = diaCalendario(c.hasta);

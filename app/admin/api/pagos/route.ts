@@ -20,6 +20,8 @@ import { repoSupabase } from '../../../../lib/mp/repo-supabase';
 import { ErrorPagos, estadoPagos, mapearPagador, sancionarNoPago, type Deps } from '../../../../lib/mp/servicio';
 import { mensajeDePagos } from '../../../../lib/cierre/datos';
 import { exigirMatchId } from '../../../../lib/mp/ids';
+import { asignarPagosADeudas, sancionHastaPagarActiva, ventanaConciliacion } from '../../../../lib/mp/deudas';
+import { aPagoMp, esPagoDePichanga } from '../../../../lib/mp/pagos-mp';
 
 const ADMINS = ['bmadain@gmail.com', 'pablo.ibanezd@gmail.com'];
 // Titulares que no pagan la cancha (Barham organiza y es admin).
@@ -54,6 +56,17 @@ function deps(): Deps {
   };
 }
 
+async function extraDeudas(d: ReturnType<typeof deps>) {
+  const sancion_hasta_pagar = sancionHastaPagarActiva();
+  if (!sancion_hasta_pagar) return { sancion_hasta_pagar, sancionHastaPagar: false, deudas: [] as Awaited<ReturnType<typeof d.repo.deudas>> };
+  try {
+    const deudas = await d.repo.deudas(GRUPO_ID);
+    return { sancion_hasta_pagar, sancionHastaPagar: true, deudas };
+  } catch {
+    return { sancion_hasta_pagar, sancionHastaPagar: true, deudas: [] as Awaited<ReturnType<typeof d.repo.deudas>> };
+  }
+}
+
 function fallo(e: unknown) {
   if (e instanceof ErrorPagos) return NextResponse.json({ error: e.message }, { status: e.status });
   if (e instanceof MpNoConfigurado) return NextResponse.json({ error: e.message }, { status: 503 });
@@ -72,9 +85,11 @@ export async function GET(req: NextRequest) {
     // Cada GET consulta MercadoPago en el momento: nunca cachear (botón «Revisar pagos»)
     const matchId = req.nextUrl.searchParams.get('match_id');
     if (matchId) exigirMatchId(matchId);
-    const estado = await estadoPagos(deps(), GRUPO_ID, matchId);
-    const mensaje = await mensajeDePagos(estado, GRUPO_ID);
-    return NextResponse.json({ ...estado, ...mensaje }, { headers: NO_STORE });
+    const d = deps();
+    const estado = await estadoPagos(d, GRUPO_ID, matchId);
+    const extra = await extraDeudas(d);
+    const mensaje = await mensajeDePagos(estado, GRUPO_ID, extra);
+    return NextResponse.json({ ...estado, ...mensaje, ...extra }, { headers: NO_STORE });
   } catch (e) { return fallo(e); }
 }
 
@@ -99,6 +114,49 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(await sancionarNoPago(d, GRUPO_ID, {
           match_id: matchId, user_id: String(body.user_id || ''), confirmar: body.confirmar,
         }, adminId));
+      }
+      case 'saldar_deuda': {
+        if (!sancionHastaPagarActiva()) return NextResponse.json({ ok: true, omitido: true });
+        const userId = String(body.user_id || '');
+        if (!userId) throw new ErrorPagos('faltan datos');
+        const activas = (await d.repo.deudas(GRUPO_ID)).filter((x) => x.user_id === userId && x.status === 'activa');
+        activas.sort((a, b) => a.fecha.localeCompare(b.fecha));
+        if (!activas[0]) return NextResponse.json({ ok: true, ya_saldada: true });
+        const saldo = await d.repo.saldarDeuda({ debt_id: activas[0].id, via: 'manual', by: adminId });
+        if (!saldo.ok) throw new ErrorPagos('no se pudo marcar la deuda (falta aplicar la migración)', 503);
+        return NextResponse.json(saldo);
+      }
+      case 'conciliar_deudas': {
+        if (!sancionHastaPagarActiva()) return NextResponse.json({ ok: true, omitido: true, saldadas: [] });
+        if (!d.mp) throw new ErrorPagos('sin MercadoPago no se puede conciliar', 503);
+        const deudas = (await d.repo.deudas(GRUPO_ID)).filter((x) => x.status === 'activa' && x.fecha);
+        if (!deudas.length) return NextResponse.json({ ok: true, saldadas: [], sin_mapear: [] });
+        const ventana = ventanaConciliacion(deudas.map((x) => x.fecha), new Date());
+        const raw = await d.mp.buscarAprobados(ventana.desde, ventana.hasta);
+        const pagos = raw.filter((r) => esPagoDePichanga(r, null)).map((r) => {
+          const pago = aPagoMp(r);
+          return { id: String(pago.id), fecha: pago.fecha, pago };
+        });
+        const partidos = await Promise.all(deudas.map((x) => d.repo.partido(x.match_id)));
+        const tits = await d.repo.titularesDe(partidos.filter((p): p is NonNullable<typeof p> => Boolean(p)));
+        const perfiles = Object.values(tits).flat();
+        const aliases = await d.repo.aliases(GRUPO_ID);
+        const plan = asignarPagosADeudas({ deudas, pagos, perfiles, aliases });
+        const saldadas: string[] = [];
+        for (const s of plan) {
+          try {
+            const r = await d.repo.saldarDeuda({ debt_id: s.debtId, via: 'mp', settled_at: s.settledAt, mp_payment_id: s.paymentId, by: adminId });
+            if (r.ok && !r.ya_saldada) saldadas.push(s.debtId);
+          } catch (e: any) {
+            if (e?.code !== '23505') throw e;
+          }
+        }
+        const cubiertas = new Set(plan.map((s) => s.debtId));
+        return NextResponse.json({
+          ok: true,
+          saldadas,
+          sin_mapear: deudas.filter((x) => !cubiertas.has(x.id)).map((x) => ({ user_id: x.user_id, fecha: x.fecha })),
+        });
       }
       default:
         throw new ErrorPagos('acción desconocida');
