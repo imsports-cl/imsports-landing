@@ -7,6 +7,7 @@
  * POST { accion: 'mapear', payment_id, user_id }      → alias pagador → jugador
  *      { accion: 'quitar_alias', alias_id }
  *      { accion: 'sancion_no_pago', match_id, user_id, confirmar: true }
+ *      { accion: 'cerrar_mensaje', match_id } → match_closed (idempotente) y mensaje recalculado
  *
  * MercadoPago: solo GET /v1/payments/search y GET /v1/payments/{id}, con
  * MP_ACCESS_TOKEN (server-only, nunca NEXT_PUBLIC_). Al navegador va solo
@@ -19,6 +20,7 @@ import { buscarPagosAprobados, mpConfigurado, obtenerPago, MpError, MpNoConfigur
 import { repoSupabase } from '../../../../lib/mp/repo-supabase';
 import { ErrorPagos, estadoPagos, mapearPagador, sancionarNoPago, type Deps } from '../../../../lib/mp/servicio';
 import { mensajeDePagos } from '../../../../lib/cierre/datos';
+import { asegurarCierrePartido } from '../../../../lib/cierre/registrar';
 
 const ADMINS = ['bmadain@gmail.com', 'pablo.ibanezd@gmail.com'];
 // Titulares que no pagan la cancha (Barham organiza y es admin).
@@ -94,6 +96,14 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(await sancionarNoPago(d, GRUPO_ID, {
           match_id: String(body.match_id || ''), user_id: String(body.user_id || ''), confirmar: body.confirmar,
         }, adminId));
+      case 'cerrar_mensaje': {
+        const matchId = String(body.match_id || '');
+        if (!matchId) throw new ErrorPagos('faltan datos');
+        await asegurarCierrePartido(GRUPO_ID, matchId);
+        const estado = await estadoPagos(d, GRUPO_ID, matchId);
+        const mensaje = await mensajeDePagos(estado, GRUPO_ID);
+        return NextResponse.json({ ...estado, ...mensaje }, { headers: NO_STORE });
+      }
       default:
         throw new ErrorPagos('acción desconocida');
     }
