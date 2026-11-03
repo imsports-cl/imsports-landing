@@ -18,6 +18,8 @@ import { supabase as service } from '../../../../lib/supabase';
 import { buscarPagosAprobados, mpConfigurado, obtenerPago, MpError, MpNoConfigurado } from '../../../../lib/mp/client';
 import { repoSupabase } from '../../../../lib/mp/repo-supabase';
 import { ErrorPagos, estadoPagos, mapearPagador, sancionarNoPago, type Deps } from '../../../../lib/mp/servicio';
+import { mensajeDePagos } from '../../../../lib/cierre/datos';
+import { exigirMatchId } from '../../../../lib/mp/ids';
 
 const ADMINS = ['bmadain@gmail.com', 'pablo.ibanezd@gmail.com'];
 // Titulares que no pagan la cancha (Barham organiza y es admin).
@@ -68,7 +70,11 @@ export async function GET(req: NextRequest) {
   if (deny) return deny;
   try {
     // Cada GET consulta MercadoPago en el momento: nunca cachear (botón «Revisar pagos»)
-    return NextResponse.json(await estadoPagos(deps(), GRUPO_ID, req.nextUrl.searchParams.get('match_id')), { headers: NO_STORE });
+    const matchId = req.nextUrl.searchParams.get('match_id');
+    if (matchId) exigirMatchId(matchId);
+    const estado = await estadoPagos(deps(), GRUPO_ID, matchId);
+    const mensaje = await mensajeDePagos(estado, GRUPO_ID);
+    return NextResponse.json({ ...estado, ...mensaje }, { headers: NO_STORE });
   } catch (e) { return fallo(e); }
 }
 
@@ -87,10 +93,13 @@ export async function POST(req: NextRequest) {
         if (!body.alias_id) throw new ErrorPagos('faltan datos');
         await d.repo.borrarAlias(GRUPO_ID, String(body.alias_id));
         return NextResponse.json({ ok: true });
-      case 'sancion_no_pago':
+      case 'sancion_no_pago': {
+        const matchId = String(body.match_id || '');
+        exigirMatchId(matchId);
         return NextResponse.json(await sancionarNoPago(d, GRUPO_ID, {
-          match_id: String(body.match_id || ''), user_id: String(body.user_id || ''), confirmar: body.confirmar,
+          match_id: matchId, user_id: String(body.user_id || ''), confirmar: body.confirmar,
         }, adminId));
+      }
       default:
         throw new ErrorPagos('acción desconocida');
     }

@@ -29,6 +29,11 @@ interface Datos {
   titulares: Fila[];
   sin_asignar: SinAsignar[];
   resumen: { titulares: number; pagados: number; pagados_tarde?: number; no_pagados: number; sin_asignar: number; recaudado: number } | null;
+  mensaje_cierre?: string;
+  mensaje_cierre_bloqueado?: boolean;
+  mensaje_cierre_aviso?: string | null;
+  bloqueo?: 'historial_incompleto' | 'mp_no_configurado' | 'mp_incompleto' | 'cupos_no_disponibles' | 'sin_certeza' | null;
+  sin_cierre?: boolean;
   alias: { id: string; jugador: string; pagador: string }[];
   miembros: { user_id: string; nombre: string }[];
 }
@@ -59,6 +64,9 @@ export default function Pagos({ token }: { token: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [asignar, setAsignar] = useState<Record<string, string>>({});
+  const [copiado, setCopiado] = useState(false);
+  const [mensajeStale, setMensajeStale] = useState(false);
+  const mensajeRef = useRef<HTMLTextAreaElement>(null);
 
   const [revisando, setRevisando] = useState(false);
 
@@ -75,12 +83,19 @@ export default function Pagos({ token }: { token: string }) {
       });
       const j = await r.json().catch(() => ({}));
       if (mio !== reqId.current) return;
-      if (!r.ok) { setErr(j.error || `No se pudieron cargar los pagos (${r.status})`); return; }
+      if (!r.ok) {
+        setErr(j.error || `No se pudieron cargar los pagos (${r.status})`);
+        setMensajeStale(true);
+        return;
+      }
       setD(j);
+      setMensajeStale(false);
+      setCopiado(false);
       if (!id) setMatchId(j.partido.id);
     } catch {
       if (mio !== reqId.current) return;
       setErr('No se pudo conectar con el servidor. Revisa tu conexión e intenta de nuevo.');
+      setMensajeStale(true);
     }
   };
   const revisar = async () => {
@@ -117,6 +132,26 @@ export default function Pagos({ token }: { token: string }) {
     if (!window.confirm(msg)) return;
     const j = await post({ accion: 'sancion_no_pago', match_id: d.partido.id, user_id: f.user_id, confirmar: true }, f.user_id);
     if (j?.ya_existia) alert(`${f.nombre} ya tenía la sanción para el ${fechaCorta(j.applies_to)}.`);
+  };
+
+  const copiarTexto = async (texto: string) => {
+    try {
+      await navigator.clipboard.writeText(texto);
+    } catch {
+      const el = mensajeRef.current;
+      if (!el) return;
+      el.focus();
+      el.value = texto;
+      el.select();
+      document.execCommand('copy');
+    }
+    setCopiado(true);
+    window.setTimeout(() => setCopiado(false), 2000);
+  };
+
+  const copiarMensaje = async () => {
+    if (!d?.mensaje_cierre || d.mensaje_cierre_bloqueado || mensajeStale) return;
+    await copiarTexto(d.mensaje_cierre);
   };
 
   const box: React.CSSProperties = { background: S.card, border: `1px solid ${S.border}`, borderRadius: 14, padding: 20, marginBottom: 16 };
@@ -200,6 +235,36 @@ export default function Pagos({ token }: { token: string }) {
         )}
         {err && <p role="alert" style={{ color: S.red, fontSize: 13, margin: '8px 0 0' }}>{err}</p>}
       </section>
+
+      {d.mensaje_cierre != null && (
+        <section style={box}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>Mensaje de cierre</h3>
+            <button type="button" onClick={copiarMensaje} disabled={d.mensaje_cierre_bloqueado || mensajeStale}
+              style={{ ...btn(S.accent), opacity: d.mensaje_cierre_bloqueado || mensajeStale ? 0.45 : 1, cursor: d.mensaje_cierre_bloqueado || mensajeStale ? 'not-allowed' : 'pointer' }}>
+              {copiado ? 'Copiado' : 'Copiar'}
+            </button>
+          </div>
+          {d.sin_cierre && (
+            <>
+              <p role="status" style={{ color: S.dim, fontSize: 13, margin: '0 0 8px' }}>
+                Este partido aún no está cerrado en la app: hasta que lo cierres, ningún pago cuenta como tarde.
+              </p>
+              <p style={{ color: S.dim, fontSize: 13, margin: '0 0 12px' }}>
+                Copia este mensaje y después cierra la pichanga en la app.
+              </p>
+            </>
+          )}
+          {(mensajeStale || d.mensaje_cierre_aviso) && (
+            <p role="status" style={{ color: S.warn, fontSize: 13, margin: '0 0 12px' }}>
+              {mensajeStale ? 'No se pudo actualizar: no uses este mensaje para sancionar' : d.mensaje_cierre_aviso}
+            </p>
+          )}
+          <textarea ref={mensajeRef} readOnly value={mensajeStale ? '' : d.mensaje_cierre} aria-label="Mensaje de cierre"
+            rows={Math.min(18, d.mensaje_cierre.split('\n').length + 1)}
+            style={{ width: '100%', boxSizing: 'border-box', background: '#0F0F0F', color: S.text, border: `1px solid ${S.border}`, borderRadius: 8, padding: 12, font: 'inherit', fontSize: 14, lineHeight: 1.45, resize: 'vertical', whiteSpace: 'pre' }} />
+        </section>
+      )}
 
       <section style={box}>
         <h3 style={{ margin: '0 0 12px', fontSize: 15, color: S.accent }}>🟢 TITULARES ({d.titulares.length})</h3>

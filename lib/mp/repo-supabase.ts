@@ -3,12 +3,17 @@
  */
 import 'server-only';
 import { supabase as db } from '../supabase';
-import { inicioPartido, TITULARES_INCOMPLETO, type PagosRepo, type Partido } from './servicio';
+import { exigirMatchId } from './ids';
+import { inicioPartido, ErrorPagos, TITULARES_INCOMPLETO, type PagosRepo, type Partido } from './servicio';
 
 const PARTIDO = 'id, group_id, date, time, price, status, phase, created_at';
 
 function err(e: any) {
-  if (e) { const x: any = new Error(e.message || 'error de base de datos'); x.code = e.code; throw x; }
+  if (!e) return;
+  if (e.code === '22P02') throw new ErrorPagos('match_id inválido', 400);
+  const x: any = new Error(e.message || 'error de base de datos');
+  x.code = e.code;
+  throw x;
 }
 
 export const repoSupabase: PagosRepo = {
@@ -20,6 +25,7 @@ export const repoSupabase: PagosRepo = {
     return (data || []) as Partido[];
   },
   async partido(matchId) {
+    exigirMatchId(matchId);
     const { data, error } = await db.from('matches').select(PARTIDO).eq('id', matchId).maybeSingle();
     err(error);
     return (data as Partido) || null;
