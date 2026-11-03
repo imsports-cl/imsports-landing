@@ -101,10 +101,19 @@ test('C5 rendimiento: grupo lun+jue un año (todo solapado) → cuántos partido
   const d = armar(ms.map((x) => x.m), todos(ms as any, [NICO]), [], Object.fromEntries(ms.map((x) => [x.m.id, x.conv])), {}, new Date(t));
   const tr = d.repo.titulares.bind(d.repo); (d.repo as any).titulares = async (m: Partido) => { titCalls++; return tr(m); };
   const orig = d.mp!.buscarAprobados; d.mp!.buscarAprobados = async (a, b) => { llamadas.push(`${a} → ${b}`); return orig(a, b); };
-  await estadoPagos(d, G, ms[103].m.id);
-  console.log('C5 llamadas MP', llamadas.length, llamadas[0], '| titulares() llamadas', titCalls);
-  assert.ok(titCalls <= 10, `cadena sin tope: ${titCalls} lecturas de titulares`);
-  assert.ok(Date.parse(llamadas[0].split(' → ')[0]) > t - 60 * 86400000, 'la búsqueda MP trae casi un año de historial');
+  const r: any = await estadoPagos(d, G, ms[103].m.id);
+  const s = await sancU(d, ms[103].m.id, 'u-nico');
+  console.log('C5 llamadas MP', llamadas.length, llamadas[0], '| titulares() llamadas', titCalls, '| historial', r.historial_incompleto, '| sanc', s);
+  assert.ok(titCalls <= 2, `titulares() por partido: ${titCalls}`);
+  // 104 partidos en ~1 año: bajo el tope (200 o 2 años) el resultado es la cadena entera.
+  // Si alguna vez pega el tope, el aviso tiene que estar y nadie se sanciona. Nunca un corte mudo.
+  if (r.historial_incompleto) {
+    assert.equal(s, '409');
+  } else {
+    assert.equal(s, 'SANCIONADO');
+    const desde = Date.parse(llamadas[0].split(' → ')[0]);
+    assert.ok(desde <= Date.parse(ms[0].conv), `la búsqueda no cubre la cadena (${llamadas[0]})`);
+  }
 });
 test('E1 sanción: quien de verdad no pagó se sanciona; con pago o ambiguo → 409; ambiguo muestra nombre, sin email', async () => {
   const ws = [W[1], W[2]];

@@ -20,6 +20,7 @@ interface SinAsignar extends PagoV { motivo: string; candidatos: string[] }
 interface Datos {
   configurado: boolean;
   mp_incompleto?: boolean;
+  historial_incompleto?: boolean;
   /** ISO: hora del servidor al consultar MercadoPago */
   revisado_at?: string;
   partidos: { id: string; fecha: string; hora: string | null; cancelado: boolean }[];
@@ -145,6 +146,11 @@ export default function Pagos({ token }: { token: string }) {
               Mercado Pago devolvió demasiados pagos para esta ventana. Los estados quedan sin certeza: no se puede sancionar hasta que la búsqueda quepa.
             </p>
           )}
+          {d.historial_incompleto && (
+            <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
+              El historial de pichangas que se solapan supera el tope (200 partidos o 2 años). No se puede sancionar: la conciliación quedaría incompleta.
+            </p>
+          )}
           {d.partido.ventana.solapa && (
             <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
               Esta ventana se solapa con otra pichanga. Un pago del tramo común se asigna a la más antigua que ese jugador todavía no tiene pagada. Revísalo antes de sancionar.
@@ -210,7 +216,7 @@ export default function Pagos({ token }: { token: string }) {
                     {!d.configurado ? <span style={{ color: S.dim }}>—</span>
                       : f.estado === 'pagado' ? <>✅ Pagó <span style={{ color: S.dim }}>· {f.pago?.pagador} · por {VIA[f.pago?.via || ''] || f.pago?.via}</span></>
                       : f.estado === 'pagado_tarde' ? <>🕓 Pagó tarde <span style={{ color: S.dim }}>· {fechaPago(f.pago!)} · {f.pago?.pagador} · por {VIA[f.pago?.via || ''] || f.pago?.via}</span></>
-                      : <>❌ No pagó{f.solape && <span style={{ color: S.warn }}> · {f.nombre}: pago en el solape, no sancionar sin revisar</span>}</>}
+                      : <>❌ No pagó{f.solape && <span style={{ color: S.warn }}> · {f.nombre}: {d.historial_incompleto ? 'historial incompleto, no sancionar' : 'pago en el solape, no sancionar sin revisar'}</span>}</>}
                   </td>
                   <td style={{ ...td, color: f.estado === 'pagado_tarde' ? S.warn : S.dim, fontSize: 13 }}>{f.pago ? fechaPago(f.pago) : '—'}</td>
                   <td style={td}>{f.pago ? clp(f.pago.monto) : '—'}</td>

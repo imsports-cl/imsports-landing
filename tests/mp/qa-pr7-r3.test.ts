@@ -47,11 +47,13 @@ test('D1 pagó A y paga B el mié: B pagado, A sin duplicado', async () => {
   assert.deepEqual([a.e, a.id, b.e, b.id], ['pagado', '301', 'pagado', '302']);
   assert.ok(!a.sin.some((s) => s.startsWith('302:') && !s.endsWith('fuera_de_ventana')));
 });
-test('D2 no pagó A, un pago el mié: A tarde, B no_pagado NO sancionable, solapa visible', async () => {
+test('D2 no pagó A, un pago el mié: A tarde, B no_pagado; ventanas ya cerradas, B sancionable', async () => {
   const d = armar([A, B], { [A.id]: [NICO], [B.id]: [NICO] }, [pago(303, '2026-10-28T10:00:00-03:00', NICO)], CONV, CIE, AHORA);
   const a = await st(d, A.id), b = await st(d, B.id);
   assert.deepEqual([a.e, a.id, b.e, b.solapa], ['pagado_tarde', '303', 'no_pagado', true]);
-  assert.equal(await sancR(d, B.id), '409:409');
+  // AHORA es 10-nov: la ventana de B (fin 7-nov) ya cerró. El 409 eterno por solape
+  // quedó reemplazado: con todas las ventanas cerradas el resultado voraz es final.
+  assert.equal(await sancR(d, B.id), 'SANCIONADO');
   assert.equal(await sancR(d, A.id), 'SANCIONADO');
 });
 test('D3 dos pagos en el solape: A y B pagados', async () => {

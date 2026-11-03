@@ -116,10 +116,10 @@ function convocatoriaAcotada(evento: string | null, createdAt: string | null | u
   return d;
 }
 
-/** Hacia atrás desde el partido visto: él y hasta 6 anteriores, no más viejos que 45 días. */
-const PREVIOS_MAX = 6;
-const DIAS_ATRAS = 45;
-const LIMITE_PARTIDOS = PREVIOS_MAX + 1;
+/** Tope de seguridad. Si la cadena lo alcanza, la vista es «historial incompleto» (no se corta en silencio). */
+const CADENA_MAX = 200;
+const ANIOS_CADENA = 2;
+const LIMITE_PARTIDOS = CADENA_MAX + 1;
 
 function ymdSantiago(ms: number): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -150,24 +150,34 @@ function seSolapan(a: VentanaLista, b: VentanaLista): boolean {
   return a.desde < b.fin && b.desde < a.fin;
 }
 
+function restarAnios(ymd: string, anios: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y - anios, m - 1, d)).toISOString().slice(0, 10);
+}
+
 /**
- * Partido N y los anteriores que se solapan con él, hasta 6 y sin pasar
- * de 45 días de calendario en Chile antes de su convocatoria. No incluye
- * partidos posteriores: la asignación de N no depende de N+1.
+ * Cadena de ventanas que se solapan, hacia atrás hasta el primer hueco.
+ * No incluye partidos posteriores. Si topa con 200 partidos o 2 años,
+ * `incompleto` (no se recorta en silencio).
  */
-function ventanaHaciaAtras(orden: VentanaLista[], id: string): VentanaLista[] {
+function cadenaNatural(orden: VentanaLista[], id: string): { cadena: VentanaLista[]; incompleto: boolean } {
   const i = orden.findIndex((w) => w.id === id);
-  if (i < 0) return [];
+  if (i < 0) return { cadena: [], incompleto: false };
   const ancla = orden[i];
-  const piso = restarDias(ymdSantiago(ancla.desde), DIAS_ATRAS);
+  const piso = restarAnios(ymdSantiago(ancla.inicio), ANIOS_CADENA);
   const out = [ancla];
-  for (let k = i - 1; k >= 0 && out.length <= PREVIOS_MAX; k--) {
+  let incompleto = false;
+  for (let k = i - 1; k >= 0; k--) {
     const prev = orden[k];
     if (!seSolapan(prev, out[0])) break;
-    if (ymdSantiago(prev.inicio) < piso) break;
+    if (out.length >= CADENA_MAX || ymdSantiago(prev.inicio) < piso) {
+      incompleto = true;
+      break;
+    }
     out.unshift(prev);
   }
-  return out;
+  if (!incompleto && out[0]?.id === orden[0]?.id && orden.length >= LIMITE_PARTIDOS) incompleto = true;
+  return { cadena: out, incompleto };
 }
 
 type DestinoPago =
@@ -222,7 +232,7 @@ function paganDe(deps: Deps, filas: Titular[]): Titular[] {
 async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
   const visto = inicioPartido(m);
   const diaN = ymdSantiago(visto.getTime());
-  const piso = restarDias(diaN, DIAS_ATRAS + 7);
+  const piso = restarAnios(diaN, ANIOS_CADENA);
   const hasta = restarDias(diaN, -1);
   const [activos, eventoCierre, aliases, miembros] = await Promise.all([
     deps.repo.partidosActivos(m.group_id, `${piso}T00:00:00.000Z`, `${hasta}T00:00:00.000Z`, LIMITE_PARTIDOS),
@@ -241,7 +251,21 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
       recibe: p.status !== 'cancelled', titulares: [],
     };
   }).sort((a, b) => a.inicio - b.inicio || a.id.localeCompare(b.id));
-  const trozo = ventanaHaciaAtras(esqueleto, m.id);
+  let { cadena: trozo, incompleto } = cadenaNatural(esqueleto, m.id);
+  // El filtro de fechas no trae lo anterior al piso. Si ese partido igual se solapa, la cadena pega el tope.
+  if (!incompleto && trozo.length > 0 && trozo[0].id === esqueleto[0]?.id && esqueleto.length < LIMITE_PARTIDOS) {
+    const primero = lista.find((p) => p.id === trozo[0].id);
+    const ant = primero ? await deps.repo.partidoAnterior(primero) : null;
+    if (ant && !lista.some((p) => p.id === ant.id)) {
+      const convAnt = (await deps.repo.convocatorias(m.group_id, [ant.id]))[ant.id] ?? null;
+      const ini = inicioPartido(ant);
+      const desde = convocatoriaAcotada(convAnt, ant.created_at, ini).getTime();
+      const borde: VentanaLista = {
+        id: ant.id, inicio: ini.getTime(), desde, fin: ini.getTime() + DIAS_VENTANA * 86400000, recibe: true, titulares: [],
+      };
+      if (seSolapan(borde, trozo[0])) incompleto = true;
+    }
+  }
   const otros = trozo.filter((w) => w.id !== m.id).map((w) => lista.find((p) => p.id === w.id)).filter((p): p is Partido => Boolean(p));
   const leidos = await deps.repo.titularesDe(otros);
   const titularesPor = new Map<string, Titular[]>([[m.id, tit]]);
@@ -269,14 +293,17 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
   const cierre: CierrePago = cierrePago(m, eventoCierre);
   const nombres = new Map(miembros.map((x) => [x.user_id, x.nombre]));
   const sinCerteza = new Set<string>();
-  if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null, sinCerteza, nombres, mpIncompleto: false };
+  if (incompleto) for (const t of tit) sinCerteza.add(t.user_id);
+  if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null, sinCerteza, nombres, mpIncompleto: false, historialIncompleto: incompleto };
 
   const buscarDesde = new Date(Math.min(...orden.map((w) => w.desde)));
+  const finCadena = new Date(Math.max(...orden.map((w) => w.fin)));
   const ahora = deps.ahora();
-  if (ahora.getTime() <= buscarDesde.getTime()) {
-    return { v, cierre, cruce: cruzarPagos(tit, [], aliases, (id) => nombres.get(id), cierre.en), sinCerteza, nombres, mpIncompleto: false };
+  const buscarHasta = finCadena.getTime() < ahora.getTime() ? finCadena : ahora;
+  if (buscarHasta.getTime() <= buscarDesde.getTime()) {
+    return { v, cierre, cruce: cruzarPagos(tit, [], aliases, (id) => nombres.get(id), cierre.en), sinCerteza, nombres, mpIncompleto: false, historialIncompleto: incompleto };
   }
-  const raw = await deps.mp.buscarAprobados(isoSantiago(buscarDesde), isoSantiago(ahora));
+  const raw = await deps.mp.buscarAprobados(isoSantiago(buscarDesde), isoSantiago(buscarHasta));
   const mpIncompleto = Boolean((raw as { truncado?: boolean }).truncado);
   if (mpIncompleto) for (const t of tit) sinCerteza.add(t.user_id);
   const precio = m.price != null ? Number(m.price) : null;
@@ -313,11 +340,14 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
       continue;
     }
     const aqui = identificarPago(actual.titulares, p, aliases);
-    if (aqui.tipo === 'unico' && !asignadosAqui.has(aqui.userId)) sinCerteza.add(aqui.userId);
-    else if (aqui.tipo === 'ambiguo') aqui.userIds.forEach((u) => { if (!asignadosAqui.has(u)) sinCerteza.add(u); });
+    // El solape solo deja la sanción en duda mientras alguna ventana involucrada sigue abierta.
+    const ahoraMs = ahora.getTime();
+    const abierta = orden.some((w) => t >= w.desde && t < w.fin && w.fin > ahoraMs);
+    if (abierta && aqui.tipo === 'unico' && !asignadosAqui.has(aqui.userId)) sinCerteza.add(aqui.userId);
+    else if (abierta && aqui.tipo === 'ambiguo') aqui.userIds.forEach((u) => { if (!asignadosAqui.has(u)) sinCerteza.add(u); });
   }
   return {
-    v, cierre, sinCerteza, nombres, mpIncompleto,
+    v, cierre, sinCerteza, nombres, mpIncompleto, historialIncompleto: incompleto,
     cruce: cruzarPagos(tit, propios, aliases, (id) => nombres.get(id), cierre.en, fuera),
   };
 }
@@ -332,7 +362,7 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
   const revisado_at = deps.ahora().toISOString();
   const { m, recientes } = await elegirPartido(deps, groupId, matchId);
   const tit = await titularesQuePagan(deps, m);
-  const { v, cierre, cruce: c, sinCerteza, mpIncompleto } = await cruce(deps, m, tit);
+  const { v, cierre, cruce: c, sinCerteza, mpIncompleto, historialIncompleto } = await cruce(deps, m, tit);
   const fecha_sancion = await fechaSancion(deps.repo, m);
   const [sanc, aliases, miembros] = await Promise.all([
     deps.repo.sanciones(m.group_id, fecha_sancion),
@@ -346,6 +376,7 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
     configurado: Boolean(deps.mp),
     /** La búsqueda de Mercado Pago se cortó en el tope de páginas: no sancionar. */
     mp_incompleto: mpIncompleto,
+    historial_incompleto: historialIncompleto,
     revisado_at,
     partidos: recientes.map((p) => ({ id: p.id, fecha: ymd(p.date), hora: p.time, cancelado: p.status === 'cancelled' })),
     partido: {
@@ -402,7 +433,10 @@ export async function sancionarNoPago(
   const jugador = tit.find((t) => t.user_id === input.user_id);
   if (!jugador) throw new ErrorPagos('no es titular de este partido (o no paga)');
   if (!deps.mp) throw new ErrorPagos('sin MercadoPago no se puede verificar el pago', 503);
-  const { cruce: c, sinCerteza } = await cruce(deps, m, tit);
+  const { cruce: c, sinCerteza, historialIncompleto } = await cruce(deps, m, tit);
+  if (historialIncompleto) {
+    throw new ErrorPagos('Historial incompleto (más de 200 pichangas o 2 años solapados); no se puede sancionar', 409);
+  }
   // Solo bloquea a quien pagó A TIEMPO. «Pagó tarde» no levanta la sanción: se puede cargar.
   if (c?.titulares.find((f) => f.user_id === jugador.user_id)?.estado === 'pagado') {
     throw new ErrorPagos(`${jugador.nombre} figura con pago a tiempo`, 409);
