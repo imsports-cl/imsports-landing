@@ -110,7 +110,7 @@ export const repoSupabase: PagosRepo = {
     const { data, error } = await db.from('matches').select(PARTIDO)
       .eq('group_id', groupId).neq('status', 'cancelled')
       .gte('date', desde).lt('date', hasta)
-      .order('date', { ascending: true }).limit(limite);
+      .order('date', { ascending: false }).limit(limite);
     err(error);
     return ((data || []) as Partido[])
       .sort((a, b) => inicioPartido(a).getTime() - inicioPartido(b).getTime());

@@ -116,17 +116,22 @@ function convocatoriaAcotada(evento: string | null, createdAt: string | null | u
   return d;
 }
 
-/** Tope de la cadena: 6 partidos o 45 días (el bloque calendario), lo que llegue antes. */
-const CADENA_MAX = 6;
-const CADENA_DIAS = 45;
-const EPOCH_CADENA = Date.UTC(2020, 0, 1);
-const DIA_MS = 86400000;
-const LIMITE_PARTIDOS = 20;
+/** Hacia atrás desde el partido visto: él y hasta 6 anteriores, no más viejos que 45 días. */
+const PREVIOS_MAX = 6;
+const DIAS_ATRAS = 45;
+const LIMITE_PARTIDOS = PREVIOS_MAX + 1;
 
-function bucketDe(inicioMs: number): { desde: number; hasta: number } {
-  const n = Math.floor((inicioMs - EPOCH_CADENA) / (CADENA_DIAS * DIA_MS));
-  const desde = EPOCH_CADENA + n * CADENA_DIAS * DIA_MS;
-  return { desde, hasta: desde + CADENA_DIAS * DIA_MS };
+function ymdSantiago(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(ms));
+}
+
+function restarDias(ymd: string, dias: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  t.setUTCDate(t.getUTCDate() - dias);
+  return t.toISOString().slice(0, 10);
 }
 
 interface VentanaLista {
@@ -145,15 +150,24 @@ function seSolapan(a: VentanaLista, b: VentanaLista): boolean {
   return a.desde < b.fin && b.desde < a.fin;
 }
 
-/** Misma cadena de ventanas que se solapan, de la más antigua a la más nueva. */
-function cadenaSolape(orden: VentanaLista[], id: string): VentanaLista[] {
+/**
+ * Partido N y los anteriores que se solapan con él, hasta 6 y sin pasar
+ * de 45 días de calendario en Chile antes de su convocatoria. No incluye
+ * partidos posteriores: la asignación de N no depende de N+1.
+ */
+function ventanaHaciaAtras(orden: VentanaLista[], id: string): VentanaLista[] {
   const i = orden.findIndex((w) => w.id === id);
   if (i < 0) return [];
-  let lo = i;
-  let hi = i;
-  while (lo > 0 && seSolapan(orden[lo - 1], orden[lo])) lo--;
-  while (hi < orden.length - 1 && seSolapan(orden[hi], orden[hi + 1])) hi++;
-  return orden.slice(lo, hi + 1);
+  const ancla = orden[i];
+  const piso = restarDias(ymdSantiago(ancla.desde), DIAS_ATRAS);
+  const out = [ancla];
+  for (let k = i - 1; k >= 0 && out.length <= PREVIOS_MAX; k--) {
+    const prev = orden[k];
+    if (!seSolapan(prev, out[0])) break;
+    if (ymdSantiago(prev.inicio) < piso) break;
+    out.unshift(prev);
+  }
+  return out;
 }
 
 type DestinoPago =
@@ -205,20 +219,13 @@ function paganDe(deps: Deps, filas: Titular[]): Titular[] {
   return filas.filter((t) => !no.has(normalizarEmail(t.email)));
 }
 
-/** Trozo de a lo más 6 partidos. El mismo trozo para cualquiera de sus vistas. */
-function acotarCadena(comp: VentanaLista[], id: string, bucketDesde: number): { cadena: VentanaLista[]; borde: boolean } {
-  const idx = Math.max(0, comp.findIndex((w) => w.id === id));
-  const start = Math.floor(idx / CADENA_MAX) * CADENA_MAX;
-  const cadena = comp.slice(start, start + CADENA_MAX);
-  const borde = start > 0 || (cadena[0] != null && cadena[0].desde < bucketDesde);
-  return { cadena, borde };
-}
-
 async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
-  const visto = inicioPartido(m).getTime();
-  const bucket = bucketDe(visto);
+  const visto = inicioPartido(m);
+  const diaN = ymdSantiago(visto.getTime());
+  const piso = restarDias(diaN, DIAS_ATRAS + 7);
+  const hasta = restarDias(diaN, -1);
   const [activos, eventoCierre, aliases, miembros] = await Promise.all([
-    deps.repo.partidosActivos(m.group_id, new Date(bucket.desde).toISOString(), new Date(bucket.hasta).toISOString(), LIMITE_PARTIDOS),
+    deps.repo.partidosActivos(m.group_id, `${piso}T00:00:00.000Z`, `${hasta}T00:00:00.000Z`, LIMITE_PARTIDOS),
     deps.repo.eventoCierre(m),
     deps.repo.aliases(m.group_id),
     deps.repo.miembros(m.group_id),
@@ -234,25 +241,34 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
       recibe: p.status !== 'cancelled', titulares: [],
     };
   }).sort((a, b) => a.inicio - b.inicio || a.id.localeCompare(b.id));
-  const { cadena: trozo, borde } = acotarCadena(cadenaSolape(esqueleto, m.id), m.id, bucket.desde);
+  const trozo = ventanaHaciaAtras(esqueleto, m.id);
   const otros = trozo.filter((w) => w.id !== m.id).map((w) => lista.find((p) => p.id === w.id)).filter((p): p is Partido => Boolean(p));
   const leidos = await deps.repo.titularesDe(otros);
   const titularesPor = new Map<string, Titular[]>([[m.id, tit]]);
   for (const [id, filas] of Object.entries(leidos)) titularesPor.set(id, paganDe(deps, filas));
   const orden = trozo.map((w) => ({ ...w, titulares: titularesPor.get(w.id) || [] }));
   const actual = orden.find((w) => w.id === m.id) || {
-    id: m.id, inicio: visto, desde: 0, fin: 0, recibe: m.status !== 'cancelled', titulares: tit,
+    id: m.id, inicio: visto.getTime(), desde: 0, fin: 0, recibe: m.status !== 'cancelled', titulares: tit,
   };
   const v0 = ventanaPagos(m.date, m.time, deps.ahora(), { convocatoria: convs[m.id] ?? m.created_at ?? null });
   actual.desde = v0.desde.getTime();
   actual.fin = v0.fin.getTime();
-  const solapa = orden.some((o) => o.id !== m.id && seSolapan(actual, o));
+  let solapa = orden.some((o) => o.id !== m.id && seSolapan(actual, o));
+  if (!solapa) {
+    // El aviso también mira el partido siguiente, sin usarlo para asignar.
+    const sig = await deps.repo.partidoSiguiente(m);
+    if (sig) {
+      const convSig = (await deps.repo.convocatorias(m.group_id, [sig.id]))[sig.id] ?? null;
+      const ini = inicioPartido(sig);
+      const desde = convocatoriaAcotada(convSig, sig.created_at, ini).getTime();
+      const fin = ini.getTime() + DIAS_VENTANA * 86400000;
+      solapa = actual.desde < fin && desde < actual.fin;
+    }
+  }
   const v = { ...v0, solapa };
   const cierre: CierrePago = cierrePago(m, eventoCierre);
   const nombres = new Map(miembros.map((x) => [x.user_id, x.nombre]));
   const sinCerteza = new Set<string>();
-  // El partido del borde del tope (había historia más atrás) no se puede sancionar.
-  if (borde && orden[0]?.id === m.id) for (const t of tit) sinCerteza.add(t.user_id);
   if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null, sinCerteza, nombres, mpIncompleto: false };
 
   const buscarDesde = new Date(Math.min(...orden.map((w) => w.desde)));
@@ -279,7 +295,12 @@ async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
     const d = destinos.get(p.id) ?? { tipo: 'libre' as const };
     if (!enActual) { fuera.push(p); continue; }
     if (d.tipo === 'match' && d.matchId === m.id) { propios.push(p); continue; }
-    if (d.tipo === 'libre') { propios.push(p); continue; }
+    if (d.tipo === 'libre') {
+      // Segundo pago de quien ya cobró esta pichanga: lo verá la siguiente, no como duplicado aquí.
+      const aqui = identificarPago(actual.titulares, p, aliases);
+      if (!(aqui.tipo === 'unico' && asignadosAqui.has(aqui.userId))) propios.push(p);
+      continue;
+    }
     if (d.tipo === 'ambiguo') {
       if (d.matchId === m.id) {
         d.userIds.forEach((u) => sinCerteza.add(u));
