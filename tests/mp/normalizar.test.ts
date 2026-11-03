@@ -30,6 +30,7 @@ test('ventana: desde la hora del partido hasta +5 días, sin pasar de ahora', ()
   assert.equal(v.desde.toISOString(), '2026-10-19T23:00:00.000Z');
   assert.equal(v.hasta.toISOString(), ahora.toISOString());
   assert.equal(v.cerrada, false);
+  assert.equal(v.solapa, false);
   const v2 = ventanaPagos('2026-10-19', '20:00', new Date('2026-11-01T00:00:00Z'));
   assert.equal(v2.hasta.toISOString(), '2026-10-24T23:00:00.000Z');
   assert.equal(v2.cerrada, true);

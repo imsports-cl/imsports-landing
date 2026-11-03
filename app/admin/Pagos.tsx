@@ -7,7 +7,7 @@
  * la sanción) · ❌ no pagó. Esta pestaña nunca quita ni perdona sanciones.
  */
 import { useEffect, useRef, useState } from 'react';
-import { horaClt } from '../../lib/mp/tiempo';
+import { DIAS_VENTANA, horaClt } from '../../lib/mp/tiempo';
 
 const S = {
   card: '#161616', border: '#2A2A2A', accent: '#00E676', text: '#FFFFFF', dim: '#9A9A9A', red: '#FF8A8A', warn: '#F6C453',
@@ -22,7 +22,7 @@ interface Datos {
   /** ISO: hora del servidor al consultar MercadoPago */
   revisado_at?: string;
   partidos: { id: string; fecha: string; hora: string | null; cancelado: boolean }[];
-  partido: { id: string; fecha: string; hora: string | null; precio: number | null; ventana: { desde: string; hasta: string; cerrada: boolean }; cierre?: Cierre };
+  partido: { id: string; fecha: string; hora: string | null; precio: number | null; ventana: { desde: string; hasta: string; cerrada: boolean; solapa?: boolean }; cierre?: Cierre };
   fecha_sancion: string;
   titulares: Fila[];
   sin_asignar: SinAsignar[];
@@ -136,8 +136,13 @@ export default function Pagos({ token }: { token: string }) {
             <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>
               {d.partido.precio ? `${clp(d.partido.precio)} por titular · ` : ''}
               pagos aprobados en MercadoPago desde {fechaHora(d.partido.ventana.desde)} hasta {fechaHora(d.partido.ventana.hasta)}
-              {!d.partido.ventana.cerrada && ' (sigue abierta: 5 días desde el partido)'}
+              {!d.partido.ventana.cerrada && ` (sigue abierta: cierra ${DIAS_VENTANA} días después del partido)`}
             </p>
+          {d.partido.ventana.solapa && (
+            <p role="status" style={{ color: S.warn, fontSize: 13, margin: '8px 0 0' }}>
+              Esta ventana se solapa con la pichanga anterior: un pago entre el inicio de este partido y el fin de la ventana anterior puede aparecer en las dos. Revísalo antes de sancionar.
+            </p>
+          )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>

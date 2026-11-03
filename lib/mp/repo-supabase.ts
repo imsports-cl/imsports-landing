@@ -3,9 +3,9 @@
  */
 import 'server-only';
 import { supabase as db } from '../supabase';
-import type { PagosRepo, Partido } from './servicio';
+import { inicioPartido, type PagosRepo, type Partido } from './servicio';
 
-const PARTIDO = 'id, group_id, date, time, price, status, phase';
+const PARTIDO = 'id, group_id, date, time, price, status, phase, created_at';
 
 function err(e: any) {
   if (e) { const x: any = new Error(e.message || 'error de base de datos'); x.code = e.code; throw x; }
@@ -74,6 +74,25 @@ export const repoSupabase: PagosRepo = {
       .order('created_at', { ascending: true }).limit(1);
     err(error);
     return (data?.[0] as any)?.created_at ?? null;
+  },
+  async eventoConvocatoria(m) {
+    // Primer aviso de convocatoria de ESTE partido (kind match_convocatoria).
+    const { data, error } = await db.from('group_messages').select('created_at')
+      .eq('group_id', m.group_id).eq('type', 'system')
+      .eq('metadata->>kind', 'match_convocatoria').eq('metadata->>match_id', m.id)
+      .order('created_at', { ascending: true }).limit(1);
+    err(error);
+    return (data?.[0] as any)?.created_at ?? null;
+  },
+  async partidoAnterior(m) {
+    const { data, error } = await db.from('matches').select(PARTIDO)
+      .eq('group_id', m.group_id).lte('date', m.date).neq('id', m.id).neq('status', 'cancelled')
+      .order('date', { ascending: false }).limit(15);
+    err(error);
+    const inicio = inicioPartido(m).getTime();
+    return ((data || []) as Partido[])
+      .filter((p) => inicioPartido(p).getTime() < inicio)
+      .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
   },
   async sanciones(groupId, appliesTo) {
     const { data, error } = await db.from('player_sanctions')

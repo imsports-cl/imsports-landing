@@ -5,13 +5,15 @@
  */
 import { aPagoMp, esPagoDePichanga, type PagoMpRaw } from './pagos-mp';
 import { claveNombre, cruzarPagos, type AliasPagador, type ResultadoCruce, type Titular } from './cruce';
-import { isoSantiago, santiagoAUtc, ventanaPagos } from './tiempo';
+import { DIAS_VENTANA, isoSantiago, santiagoAUtc, ventanaPagos } from './tiempo';
 import { normalizarEmail } from './normalizar';
 import { cierrePago, type CierrePago } from './cierre';
 
 export interface Partido {
   id: string; group_id: string; date: string; time: string | null;
   price: number | null; status: string | null; phase: string | null;
+  /** matches.created_at. Fallback de convocatoria si no hay mensaje. */
+  created_at?: string | null;
 }
 export interface Sancion { user_id: string; applies_to: string; reason: string; note: string | null }
 
@@ -29,6 +31,13 @@ export interface PagosRepo {
    * o null. Es el cierre de pago: ver lib/mp/cierre.ts. Solo lectura.
    */
   eventoCierre(match: Partido): Promise<string | null>;
+  /**
+   * created_at del PRIMER mensaje system 'match_convocatoria' del partido, o null.
+   * Es el inicio de la ventana de pagos (ver lib/mp/tiempo.ts). Solo lectura.
+   */
+  eventoConvocatoria(match: Partido): Promise<string | null>;
+  /** Partido anterior no cancelado del mismo grupo (por hora de inicio), o null. */
+  partidoAnterior(match: Partido): Promise<Partido | null>;
   sanciones(groupId: string, appliesTo: string): Promise<Sancion[]>;
   /** INSERT simple (sin upsert). Debe lanzar { code: '23505' } si ya existe. */
   insertarSancion(s: Sancion & { group_id: string; created_by: string | null }): Promise<void>;
@@ -88,14 +97,32 @@ async function titularesQuePagan(deps: Deps, m: Partido): Promise<Titular[]> {
 }
 
 async function cruce(deps: Deps, m: Partido, tit: Titular[]) {
-  const v = ventanaPagos(m.date, m.time, deps.ahora());
-  const cierre: CierrePago = cierrePago(m, await deps.repo.eventoCierre(m));
+  const [eventoConv, anterior, eventoCierre] = await Promise.all([
+    deps.repo.eventoConvocatoria(m),
+    deps.repo.partidoAnterior(m),
+    deps.repo.eventoCierre(m),
+  ]);
+  // El mensaje manda. Si falta, matches.created_at. ventanaPagos acota al pitazo.
+  const convocatoria = eventoConv ?? m.created_at ?? null;
+  const finAnterior = anterior
+    ? new Date(inicioPartido(anterior).getTime() + DIAS_VENTANA * 86400000)
+    : null;
+  const v = ventanaPagos(m.date, m.time, deps.ahora(), { convocatoria, finAnterior });
+  const cierre: CierrePago = cierrePago(m, eventoCierre);
   if (!deps.mp) return { v, cierre, cruce: null as ResultadoCruce | null };
   if (v.hasta.getTime() <= v.desde.getTime()) {
     return { v, cierre, cruce: cruzarPagos(tit, [], [], undefined, cierre.en) };
   }
   const raw = await deps.mp.buscarAprobados(isoSantiago(v.desde), isoSantiago(v.hasta));
-  const pagos = raw.filter((r) => esPagoDePichanga(r, m.price != null ? Number(m.price) : null)).map(aPagoMp);
+  const precio = m.price != null ? Number(m.price) : null;
+  const desdeMs = v.desde.getTime();
+  const hastaMs = v.hasta.getTime();
+  // MP busca por rango, pero el fake (y un borde de offset) pueden traer de más:
+  // se compara el instante, no el texto (-04:00 de MP vs -03:00 de Chile).
+  const pagos = raw.filter((r) => esPagoDePichanga(r, precio)).map(aPagoMp).filter((p) => {
+    const t = Date.parse(p.fecha);
+    return !Number.isNaN(t) && t >= desdeMs && t <= hastaMs;
+  });
   const [aliases, miembros] = await Promise.all([deps.repo.aliases(m.group_id), deps.repo.miembros(m.group_id)]);
   const nombres = new Map(miembros.map((x) => [x.user_id, x.nombre]));
   return { v, cierre, cruce: cruzarPagos(tit, pagos, aliases, (id) => nombres.get(id), cierre.en) };
@@ -127,7 +154,7 @@ export async function estadoPagos(deps: Deps, groupId: string, matchId?: string 
     partidos: recientes.map((p) => ({ id: p.id, fecha: ymd(p.date), hora: p.time, cancelado: p.status === 'cancelled' })),
     partido: {
       id: m.id, fecha: ymd(m.date), hora: m.time, precio: m.price != null ? Number(m.price) : null,
-      ventana: { desde: v.desde.toISOString(), hasta: v.hasta.toISOString(), cerrada: v.cerrada },
+      ventana: { desde: v.desde.toISOString(), hasta: v.hasta.toISOString(), cerrada: v.cerrada, solapa: v.solapa },
       /** Cierre de pago: después de esto el pago es «pagó tarde» y no levanta la sanción */
       cierre,
     },

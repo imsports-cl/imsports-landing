@@ -3,6 +3,25 @@
  *
  * matches.date es un timestamp cuyo DÍA en UTC es el día real (la app guarda
  * 00:00Z) y matches.time es texto "HH:MM" en hora de Chile.
+ *
+ * Ventana de pagos. El FIN no cambia: inicio del partido + 5 días, sin pasar
+ * de ahora. El INICIO es la convocatoria, no el pitazo:
+ *   1. created_at del primer group_messages system con metadata.kind =
+ *      'match_convocatoria' (metadata.match_id = el partido).
+ *   2. Si no hay mensaje, matches.created_at (nunca null en la BD).
+ *   3. Si ese instante es posterior al inicio (partidos importados, cuyo
+ *      created_at quedó después del partido), se acota al inicio: la ventana
+ *      nunca arranca después del pitazo. Un pago anterior a la convocatoria
+ *      no entra; uno entre la convocatoria y el pitazo sí, y es a tiempo
+ *      (la regla de «pagó tarde» sigue siendo el cierre, no el pitazo).
+ * Solape con la pichanga anterior no cancelada del mismo grupo:
+ *   desde = max(convocatoria acotada, fin de la ventana anterior), con tope
+ *   en el inicio de este partido. Así un pago no cae en las dos cuando la
+ *   ventana anterior termina antes del pitazo (el ritmo semanal: la anterior
+ *   cierra el sábado y la convocatoria sale el domingo). Si la anterior
+ *   todavía sigue abierta al pitazo (dos partidos en la misma semana), no
+ *   recortamos más allá del inicio — se perderían pagos de este partido —
+ *   y solapa = true para que el panel avise.
  */
 const TZ = 'America/Santiago';
 
@@ -42,12 +61,54 @@ export function isoSantiago(d: Date): string {
 
 export const DIAS_VENTANA = 5;
 
-/** Ventana de búsqueda: desde la hora del partido hasta +5 días (sin pasar de ahora). */
-export function ventanaPagos(matchDate: string, matchTime: string | null, ahora: Date) {
-  const desde = santiagoAUtc(matchDate.slice(0, 10), matchTime);
-  const fin = new Date(desde.getTime() + DIAS_VENTANA * 86400000);
+export interface VentanaOpts {
+  /**
+   * Instante de la convocatoria: primer mensaje match_convocatoria, o
+   * matches.created_at si no hay mensaje. null = sin dato (se usa el inicio).
+   */
+  convocatoria?: Date | string | null;
+  /** Fin (inicio + 5 días) de la ventana del partido anterior no cancelado. */
+  finAnterior?: Date | string | null;
+}
+
+function instante(v: Date | string | null | undefined): Date | null {
+  if (v == null || v === '') return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Ventana de búsqueda de pagos aprobados.
+ * desde = convocatoria (acotada al inicio del partido), corrida al fin de la
+ * ventana anterior si se pisarían, sin pasar del pitazo. hasta = inicio + 5 días
+ * (o ahora, si la ventana sigue abierta).
+ */
+export function ventanaPagos(
+  matchDate: string,
+  matchTime: string | null,
+  ahora: Date,
+  opts?: VentanaOpts,
+) {
+  const inicio = santiagoAUtc(matchDate.slice(0, 10), matchTime);
+  const fin = new Date(inicio.getTime() + DIAS_VENTANA * 86400000);
   const hasta = fin.getTime() > ahora.getTime() ? ahora : fin;
-  return { desde, hasta, cerrada: fin.getTime() <= ahora.getTime() };
+
+  const conv = instante(opts?.convocatoria);
+  // Posterior al pitazo (imports): no abrir la ventana después del partido.
+  let desde = conv && conv.getTime() < inicio.getTime() ? conv : inicio;
+
+  let solapa = false;
+  const finAnt = instante(opts?.finAnterior);
+  if (finAnt && finAnt.getTime() > desde.getTime()) {
+    if (finAnt.getTime() > inicio.getTime()) {
+      desde = inicio;
+      solapa = true;
+    } else {
+      desde = finAnt;
+    }
+  }
+
+  return { desde, hasta, cerrada: fin.getTime() <= ahora.getTime(), solapa };
 }
 
 /**

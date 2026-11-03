@@ -1,8 +1,8 @@
 import type { AliasPagador, Titular } from '../../lib/mp/cruce';
-import type { Partido, PagosRepo, Sancion } from '../../lib/mp/servicio';
+import { inicioPartido, type Partido, type PagosRepo, type Sancion } from '../../lib/mp/servicio';
 
 /** BD en memoria. Reproduce el UNIQUE (group_id, user_id, applies_to) de player_sanctions. */
-export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string> }) {
+export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string>; convocatorias?: Record<string, string | null> }) {
   const sanciones = [...(init.sanciones || [])];
   const aliases = [...(init.aliases || [])];
   const inserts: any[] = [];
@@ -18,6 +18,13 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
         .sort((a, b) => a.date.localeCompare(b.date))[0]?.date ?? null;
     },
     async eventoCierre(m) { return init.cierres?.[m.id] ?? null; },
+    async eventoConvocatoria(m) { return init.convocatorias?.[m.id] ?? null; },
+    async partidoAnterior(m) {
+      const inicio = inicioPartido(m).getTime();
+      return init.partidos
+        .filter((p) => p.group_id === m.group_id && p.id !== m.id && p.status !== 'cancelled' && inicioPartido(p).getTime() < inicio)
+        .sort((a, b) => inicioPartido(b).getTime() - inicioPartido(a).getTime())[0] ?? null;
+    },
     async sanciones(g, f) { return sanciones.filter((s) => s.group_id === g && s.applies_to === f); },
     async insertarSancion(s) {
       if (sanciones.some((x) => x.group_id === s.group_id && x.user_id === s.user_id && x.applies_to === s.applies_to)) {

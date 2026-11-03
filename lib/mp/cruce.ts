@@ -65,7 +65,9 @@ export interface PagoSinAsignar extends PagoVisible {
 export interface ResultadoCruce {
   titulares: FilaTitular[];
   sin_asignar: PagoSinAsignar[];
-    /** pagados = a tiempo; pagados_tarde aparte (siguen sancionables); no_pagados = sin pago */
+    /** pagados = a tiempo; pagados_tarde aparte (siguen sancionables); no_pagados = sin pago.
+     *  recaudado = solo pagos asignados a un titular: un pago del mismo monto sin
+     *  identidad (o sin asignar) no infla el total. */
   resumen: { titulares: number; pagados: number; pagados_tarde: number; no_pagados: number; sin_asignar: number; recaudado: number };
   /** Cierre de pago usado (ISO UTC) o null si está pendiente */
   cierre: string | null;
@@ -222,7 +224,7 @@ export function cruzarPagos(
       pagados_tarde: cuenta('pagado_tarde'),
       no_pagados: cuenta('no_pagado'),
       sin_asignar: sin.length,
-      recaudado: pagos.reduce((s, p) => s + p.monto, 0),
+      recaudado: filas.reduce((s, f) => s + (f.pago ? f.pago.monto : 0), 0),
     },
     cierre: cierre ? new Date(cierre).toISOString() : null,
   };
