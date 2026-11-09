@@ -39,6 +39,15 @@ interface Datos {
   sancion_hasta_pagar?: boolean;
   deudas?: { id: string; user_id: string; fecha: string; nombre: string; status: string }[];
   fechas_pendientes?: { user_id: string; nombre: string; fechas: number }[];
+  /** Flag SANCIONES_AL_CIERRE. Apagado: no hay botón. */
+  sanciones_al_cierre?: boolean;
+  cierre_sancion?: {
+    status: 'processing' | 'applied' | 'skipped_incomplete' | 'alert';
+    note: string | null;
+    processed_at: string;
+    sancionados: { nombre: string; estado: 'no_pagado' | 'pagado_tarde'; deuda: boolean }[];
+  } | null;
+  cierre_sancion_aviso?: string | null;
   alias: { id: string; jugador: string; pagador: string }[];
   miembros: { user_id: string; nombre: string }[];
 }
@@ -171,6 +180,37 @@ export default function Pagos({ token }: { token: string }) {
     alert(sin ? `${aviso}\n${sin} sigue${sin === 1 ? '' : 'n'} sin saldar (no calzó alias, correo ni nombre).` : aviso);
   };
 
+  const aplicarCierre = async () => {
+    if (!d) return;
+    const pierden = d.titulares.filter((f) => f.estado !== 'pagado').map((f) => f.nombre);
+    const lista = pierden.length ? pierden.join(', ') : 'nadie';
+    const msg = `¿Aplicar las sanciones del cierre de la pichanga del ${fechaCorta(d.partido.fecha)}?\n\n` +
+      `Con el estado de ahora, pierden cupo el ${fechaCorta(d.fecha_sancion)}:\n${lista}\n\n` +
+      `Quien no pagó queda además con deuda. Quien pagó tarde solo pierde esa fecha.\n` +
+      `Si Mercado Pago, el historial o un pago en solape no dan certeza, no se sanciona a nadie y queda una alerta.\n` +
+      `No se modifica el partido. Se puede volver a apretar: no duplica.`;
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(msg)) return;
+    const j = await post({ accion: 'aplicar_sanciones_cierre', match_id: d.partido.id, confirmar: true }, 'cierre');
+    if (!j) return;
+    if (j.omitido) {
+      alert(j.note || 'Las sanciones al cierre están apagadas.');
+      return;
+    }
+    if (j.ya_aplicado) {
+      alert('Esas sanciones ya estaban aplicadas.');
+      return;
+    }
+    if (j.status === 'applied') {
+      const nombres = Array.isArray(j.sancionados) && j.sancionados.length
+        ? j.sancionados.map((s: { nombre: string }) => s.nombre).join(', ')
+        : 'nadie';
+      alert(`Listo. Sanción no_pago: ${nombres}.`);
+      return;
+    }
+    alert(j.note || 'No se aplicaron sanciones.');
+  };
+
   const copiarMensaje = async () => {
     if (!d?.mensaje_cierre || d.mensaje_cierre_bloqueado || mensajeStale) return;
     await copiarTexto(d.mensaje_cierre);
@@ -222,6 +262,13 @@ export default function Pagos({ token }: { token: string }) {
               {revisando ? 'Revisando…' : '🔄 Revisar pagos'}
             </button>
             {d.revisado_at && <span style={{ color: S.dim, fontSize: 12 }}>Última revisión: {horaClt(d.revisado_at)}</span>}
+            {d.sanciones_al_cierre && d.partido.cierre?.fuente === 'match_closed' && d.partido.cierre.en && (
+              <button type="button" onClick={aplicarCierre}
+                disabled={busy !== null || d.cierre_sancion?.status === 'applied'}
+                style={{ ...btn(S.warn), opacity: d.cierre_sancion?.status === 'applied' ? 0.55 : 1 }}>
+                {busy === 'cierre' ? 'Aplicando…' : d.cierre_sancion?.status === 'applied' ? 'Sanciones del cierre aplicadas' : 'Aplicar sanciones del cierre'}
+              </button>
+            )}
           </div>
           <label style={{ color: S.dim, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
             Pichanga
@@ -237,6 +284,22 @@ export default function Pagos({ token }: { token: string }) {
           <p style={{ color: S.warn, fontSize: 13, margin: '12px 0 0' }}>
             ⚠️ MercadoPago no está conectado (falta MP_ACCESS_TOKEN en el servidor). Se muestran los titulares sin estado de pago.
           </p>
+        )}
+        {d.sanciones_al_cierre && d.cierre_sancion && d.cierre_sancion.status !== 'applied' && (
+          <p role="alert" style={{ color: S.warn, fontSize: 13, margin: '12px 0 0', padding: '10px 12px', border: `1px solid ${S.warn}`, borderRadius: 8 }}>
+            {d.cierre_sancion.note || 'No se aplicaron las sanciones del cierre.'}
+          </p>
+        )}
+        {d.sanciones_al_cierre && d.cierre_sancion?.status === 'applied' && (
+          <p style={{ color: S.dim, fontSize: 13, margin: '12px 0 0' }}>
+            Sanciones del cierre aplicadas
+            {d.cierre_sancion.sancionados.length > 0 && <>: {d.cierre_sancion.sancionados.map((s) => s.nombre).join(', ')}</>}
+            {d.cierre_sancion.processed_at && <> · {fechaHora(d.cierre_sancion.processed_at)} CLT</>}
+            {d.cierre_sancion.note && /No se pisó|No quedó registrada/.test(d.cierre_sancion.note) && <> · {d.cierre_sancion.note}</>}
+          </p>
+        )}
+        {d.cierre_sancion_aviso && (
+          <p role="alert" style={{ color: S.warn, fontSize: 13, margin: '12px 0 0' }}>{d.cierre_sancion_aviso}</p>
         )}
         {d.partido.cierre && (
           <p style={{ color: S.dim, fontSize: 13, margin: '6px 0 0' }}>

@@ -18,6 +18,36 @@ export interface Partido {
 }
 export interface Sancion { user_id: string; applies_to: string; reason: string; note: string | null }
 
+/**
+ * Fila de public.cierre_sanciones. La 043 permite applied | skipped_incomplete | alert.
+ * `processing` no está en ese CHECK: lo agrega la 044 (no aplicada en este repo).
+ */
+export type EstadoCierreSancion = 'processing' | 'applied' | 'skipped_incomplete' | 'alert';
+
+/** La 043 guarda el snapshot como arreglo. En applied cada fila trae user_id y pagado. */
+export interface CierreSnapshotItem {
+  user_id: string;
+  nombre: string;
+  estado: 'pagado' | 'pagado_tarde' | 'no_pagado';
+  /** true solo si el pago fue a tiempo. Lo exige la 043 en un claim applied. */
+  pagado: boolean;
+  sancion: boolean;
+  deuda: boolean;
+}
+
+export type CierreSancionSnapshot = CierreSnapshotItem[];
+
+export interface CierreSancionFila {
+  match_id: string;
+  group_id: string;
+  processed_at: string;
+  /** 'cron' o 'admin:<uuid>'. Lo exige el CHECK de la 043. */
+  processed_by: string;
+  snapshot: CierreSancionSnapshot;
+  status: EstadoCierreSancion;
+  note: string | null;
+}
+
 export interface PagosRepo {
   partidosRecientes(groupId: string, limite: number): Promise<Partido[]>;
   partido(matchId: string): Promise<Partido | null>;
@@ -59,6 +89,48 @@ export interface PagosRepo {
   deudas(groupId: string): Promise<{ id: string; user_id: string; match_id: string; fecha: string; nombre: string; status: 'activa' | 'saldada' | 'condonada'; mp_payment_id: string | null }[]>;
   registrarDeuda(p: { match_id: string; user_id: string; created_by: string | null }): Promise<{ ok: boolean; omitida?: boolean }>;
   saldarDeuda(p: { debt_id: string; via: 'mp' | 'manual'; settled_at?: string | null; mp_payment_id?: string | null; by?: string | null }): Promise<{ ok: boolean; ya_saldada?: boolean }>;
+  /** Fila de cierre_sanciones, o null si ese partido todavía no se procesó. */
+  cierreSancion(matchId: string): Promise<CierreSancionFila | null>;
+  /**
+   * RPC registrar_cierre_sanciones (044). jsonb: creada, status, motivo, processed_at.
+   * motivo: creada | retomada | en_curso | applied.
+   */
+  reclamarCierre(p: {
+    match_id: string;
+    group_id: string;
+    processed_by: string;
+    snapshot: CierreSancionSnapshot;
+    status: EstadoCierreSancion;
+    note: string | null;
+  }): Promise<ReclamoCierre>;
+  /**
+   * RPC actualizar_cierre_sanciones (044). El lease es p_claimed_at.
+   * motivo applied: la fila ya es inmutable. motivo lease: otro proceso la retomó.
+   * No escribe en matches.
+   */
+  guardarCierreSancion(
+    fila: Omit<CierreSancionFila, 'processed_at'> & { processed_at?: string },
+    opts: { claimedAt: string },
+  ): Promise<ActualizacionCierre>;
+  /**
+   * Cierres >= desdeIso que no están applied (incluye processing, alert y
+   * skipped_incomplete). El RPC decide si el processing se puede retomar.
+   */
+  partidosPendientesCierre(groupId: string, desdeIso: string, limite: number): Promise<{ id: string; cerrado_en: string }[]>;
+}
+
+/** Respuesta jsonb de registrar_cierre_sanciones (044 @ 5edcf93). */
+export interface ReclamoCierre {
+  creada: boolean;
+  status: EstadoCierreSancion | null;
+  motivo: 'creada' | 'retomada' | 'en_curso' | 'applied' | null;
+  processed_at: string | null;
+}
+
+/** Respuesta de actualizar_cierre_sanciones. */
+export interface ActualizacionCierre {
+  motivo: 'actualizada' | 'applied' | 'lease';
+  fila: CierreSancionFila | null;
 }
 
 export interface MpLector {
@@ -75,9 +147,19 @@ export interface Deps {
   noPagan: string[];
   /**
    * Sanción hasta pagar (041). Si no viene, se lee SANCION_HASTA_PAGAR.
-   * Apagado: no se llama registrar_deuda_no_pago.
+   * Apagado: no se llama registrar_deuda_no_pago desde el botón de una persona.
    */
   sancionHastaPagar?: boolean;
+  /**
+   * Sanciones automáticas al cierre. Si no viene, se lee SANCIONES_AL_CIERRE.
+   * Apagado: el cron y el botón no escriben sanciones, deudas ni cierre_sanciones.
+   */
+  sancionesAlCierre?: boolean;
+  /**
+   * No procesar cierres anteriores a este instante (ISO o YYYY-MM-DD).
+   * Si no viene, se lee SANCIONES_AL_CIERRE_DESDE o el 2026-11-09.
+   */
+  sancionesAlCierreDesde?: string;
 }
 
 export class ErrorPagos extends Error {

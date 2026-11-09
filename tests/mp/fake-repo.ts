@@ -1,11 +1,16 @@
 import type { AliasPagador, Titular } from '../../lib/mp/cruce';
-import { inicioPartido, type Partido, type PagosRepo, type Sancion } from '../../lib/mp/servicio';
+import { MINUTOS_LEASE_044, validarSnapshotCierre043 } from '../../lib/mp/cierre-043';
+import { inicioPartido, type ActualizacionCierre, type CierreSancionFila, type Partido, type PagosRepo, type ReclamoCierre, type Sancion } from '../../lib/mp/servicio';
 
 /** BD en memoria. Reproduce el UNIQUE (group_id, user_id, applies_to) de player_sanctions. */
-export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string>; convocatorias?: Record<string, string | null> }) {
+export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string>; convocatorias?: Record<string, string | null>; cierreSanciones?: CierreSancionFila[] }) {
   const sanciones = [...(init.sanciones || [])];
   const aliases = [...(init.aliases || [])];
   const inserts: any[] = [];
+  const deudas: { match_id: string; user_id: string; created_by: string | null }[] = [];
+  const cierreFilas: CierreSancionFila[] = [...(init.cierreSanciones || [])];
+  /** Tablas escritas. Nunca debe aparecer `matches`. */
+  const escrituras: string[] = [];
   const miembros = init.miembros || Object.values(init.titulares).flat().map((t) => ({ user_id: t.user_id, nombre: t.nombre }));
   const repo: PagosRepo = {
     async partidosRecientes(g, n) { return init.partidos.filter((p) => p.group_id === g).sort((a, b) => b.date.localeCompare(a.date)).slice(0, n); },
@@ -61,6 +66,7 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
         throw Object.assign(new Error('duplicate key'), { code: '23505' });
       }
       sanciones.push(s); inserts.push(s);
+      escrituras.push('player_sanctions');
     },
     async guardarAlias(a) {
       for (let i = aliases.length - 1; i >= 0; i--) {
@@ -70,9 +76,79 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
       aliases.push({ ...a, id: `a-${aliases.length + 1}` });
     },
     async borrarAlias(g, id) { const i = aliases.findIndex((a) => a.group_id === g && a.id === id); if (i >= 0) aliases.splice(i, 1); },
-    async deudas() { return []; },
-    async registrarDeuda() { return { ok: true }; },
+    async deudas() {
+      return deudas.map((d, i) => ({
+        id: `d-${i}`, user_id: d.user_id, match_id: d.match_id, fecha: '', nombre: 'Jugador',
+        status: 'activa' as const, mp_payment_id: null,
+      }));
+    },
+    async registrarDeuda(p) {
+      if (deudas.some((d) => d.match_id === p.match_id && d.user_id === p.user_id)) return { ok: true };
+      deudas.push(p);
+      escrituras.push('player_debts');
+      return { ok: true };
+    },
     async saldarDeuda() { return { ok: true }; },
+    async cierreSancion(matchId) {
+      const fila = cierreFilas.find((f) => f.match_id === matchId);
+      return fila ? { ...fila, snapshot: fila.snapshot.map((x) => ({ ...x })) } : null;
+    },
+    async reclamarCierre(p): Promise<ReclamoCierre> {
+      validarSnapshotCierre043(p.status, p.snapshot);
+      const ahora = new Date().toISOString();
+      const i = cierreFilas.findIndex((f) => f.match_id === p.match_id);
+      if (i < 0) {
+        escrituras.push('cierre_sanciones');
+        cierreFilas.push({
+          match_id: p.match_id, group_id: p.group_id, processed_at: ahora,
+          processed_by: p.processed_by, snapshot: p.snapshot.map((x) => ({ ...x })), status: 'processing', note: p.note,
+        });
+        return { creada: true, status: 'processing', motivo: 'creada', processed_at: ahora };
+      }
+      const fila = cierreFilas[i];
+      if (fila.status === 'applied') {
+        return { creada: false, status: 'applied', motivo: 'applied', processed_at: fila.processed_at };
+      }
+      const edad = Date.now() - Date.parse(fila.processed_at);
+      if (fila.status === 'processing' && edad < MINUTOS_LEASE_044 * 60 * 1000) {
+        return { creada: false, status: 'processing', motivo: 'en_curso', processed_at: fila.processed_at };
+      }
+      escrituras.push('cierre_sanciones');
+      fila.processed_at = ahora;
+      fila.processed_by = p.processed_by;
+      fila.snapshot = p.snapshot.map((x) => ({ ...x }));
+      fila.status = 'processing';
+      fila.note = p.note;
+      return { creada: true, status: 'processing', motivo: 'retomada', processed_at: ahora };
+    },
+    async guardarCierreSancion(fila, opts): Promise<ActualizacionCierre> {
+      validarSnapshotCierre043(fila.status, fila.snapshot);
+      const i = cierreFilas.findIndex((f) => f.match_id === fila.match_id);
+      if (i < 0) return { motivo: 'lease', fila: null };
+      const vigente = cierreFilas[i];
+      if (vigente.status === 'applied') {
+        return { motivo: 'applied', fila: { ...vigente, snapshot: vigente.snapshot.map((x) => ({ ...x })) } };
+      }
+      if (!opts?.claimedAt || opts.claimedAt !== vigente.processed_at) {
+        return { motivo: 'lease', fila: { ...vigente, snapshot: vigente.snapshot.map((x) => ({ ...x })) } };
+      }
+      escrituras.push('cierre_sanciones');
+      vigente.status = fila.status;
+      vigente.processed_by = fila.processed_by;
+      vigente.note = fila.note;
+      vigente.snapshot = fila.snapshot.map((x) => ({ ...x }));
+      return { motivo: 'actualizada', fila: { ...vigente, snapshot: vigente.snapshot.map((x) => ({ ...x })) } };
+    },
+    async partidosPendientesCierre(groupId, desdeIso, limite) {
+      const desde = Date.parse(desdeIso);
+      const excluir = new Set(cierreFilas.filter((f) => f.status === 'applied').map((f) => f.match_id));
+      return init.partidos
+        .filter((p) => p.group_id === groupId && p.status !== 'cancelled' && init.cierres?.[p.id] && !excluir.has(p.id))
+        .map((p) => ({ id: p.id, cerrado_en: init.cierres![p.id] }))
+        .filter((p) => Date.parse(p.cerrado_en) >= desde)
+        .sort((a, b) => b.cerrado_en.localeCompare(a.cerrado_en))
+        .slice(0, limite);
+    },
   };
-  return { repo, sanciones, aliases, inserts };
+  return { repo, sanciones, aliases, inserts, deudas, cierreFilas, escrituras };
 }

@@ -3,8 +3,12 @@
  */
 import 'server-only';
 import { supabase as db } from '../supabase';
+import { validarSnapshotCierre043 } from './cierre-043';
 import { exigirMatchId } from './ids';
-import { inicioPartido, ErrorPagos, TITULARES_INCOMPLETO, type PagosRepo, type Partido } from './servicio';
+import {
+  inicioPartido, ErrorPagos, TITULARES_INCOMPLETO,
+  type ActualizacionCierre, type CierreSancionFila, type CierreSancionSnapshot, type PagosRepo, type Partido, type ReclamoCierre,
+} from './servicio';
 
 const PARTIDO = 'id, group_id, date, time, price, status, phase, created_at';
 
@@ -14,6 +18,51 @@ function err(e: any) {
   const x: any = new Error(e.message || 'error de base de datos');
   x.code = e.code;
   throw x;
+}
+
+function snapshotCierre(raw: unknown): CierreSancionSnapshot {
+  const valor = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return []; } })() : raw;
+  if (!Array.isArray(valor)) return [];
+  return valor.filter((x) => x && typeof x === 'object').map((x) => ({
+    user_id: String(x.user_id || ''),
+    nombre: String(x.nombre || ''),
+    estado: x.estado === 'pagado' || x.estado === 'pagado_tarde' ? x.estado : 'no_pagado',
+    pagado: x.pagado === true,
+    sancion: Boolean(x.sancion),
+    deuda: Boolean(x.deuda),
+  }));
+}
+
+function jsonbRpc(data: unknown): Record<string, unknown> {
+  if (Array.isArray(data)) return (data[0] && typeof data[0] === 'object' ? data[0] : {}) as Record<string, unknown>;
+  if (data && typeof data === 'object') return data as Record<string, unknown>;
+  return {};
+}
+
+function reclamoDe(data: unknown): ReclamoCierre {
+  const j = jsonbRpc(data);
+  const motivo = j.motivo;
+  return {
+    creada: j.creada === true,
+    status: (j.status as ReclamoCierre['status']) ?? null,
+    motivo: motivo === 'creada' || motivo === 'retomada' || motivo === 'en_curso' || motivo === 'applied' ? motivo : null,
+    processed_at: typeof j.processed_at === 'string' ? j.processed_at : null,
+  };
+}
+
+function filaCierre(raw: {
+  match_id: string; group_id: string; processed_at: string; processed_by?: string | null;
+  snapshot?: unknown; status: CierreSancionFila['status']; note?: string | null;
+}): CierreSancionFila {
+  return {
+    match_id: raw.match_id,
+    group_id: raw.group_id,
+    processed_at: raw.processed_at,
+    processed_by: raw.processed_by || '',
+    snapshot: snapshotCierre(raw.snapshot),
+    status: raw.status,
+    note: raw.note ?? null,
+  };
 }
 
 export const repoSupabase: PagosRepo = {
@@ -229,6 +278,92 @@ export const repoSupabase: PagosRepo = {
     if (error?.code === 'PGRST202' || error?.code === '42883' || error?.code === '42P01') return { ok: false, omitida: true };
     if (error) throw Object.assign(new Error(error.message), { code: error.code });
     return { ok: true };
+  },
+  async cierreSancion(matchId) {
+    const { data, error } = await db.from('cierre_sanciones')
+      .select('match_id, group_id, processed_at, processed_by, snapshot, status, note')
+      .eq('match_id', matchId).maybeSingle();
+    if (error?.code === '42P01' || error?.code === 'PGRST205') {
+      throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
+    }
+    err(error);
+    if (!data) return null;
+    return filaCierre(data);
+  },
+  async reclamarCierre(p) {
+    validarSnapshotCierre043(p.status, p.snapshot);
+    const { data, error } = await db.rpc('registrar_cierre_sanciones', {
+      p_match_id: p.match_id,
+      p_processed_by: p.processed_by,
+      p_snapshot: p.snapshot,
+      p_status: p.status,
+      p_note: p.note,
+    });
+    if (error?.code === '42P01' || error?.code === 'PGRST205' || error?.code === 'PGRST202' || error?.code === '42883') {
+      throw new ErrorPagos('falta registrar_cierre_sanciones', 503);
+    }
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    return reclamoDe(data);
+  },
+  async guardarCierreSancion(fila, opts): Promise<ActualizacionCierre> {
+    validarSnapshotCierre043(fila.status, fila.snapshot);
+    // Solo el RPC. No hay UPDATE directo y matches no se toca.
+    const { data, error } = await db.rpc('actualizar_cierre_sanciones', {
+      p_match_id: fila.match_id,
+      p_processed_by: fila.processed_by,
+      p_snapshot: fila.snapshot,
+      p_status: fila.status,
+      p_note: fila.note,
+      p_claimed_at: opts.claimedAt,
+    });
+    if (error?.code === '42P01' || error?.code === 'PGRST205' || error?.code === 'PGRST202' || error?.code === '42883') {
+      throw new ErrorPagos('falta actualizar_cierre_sanciones', 503);
+    }
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    const motivo = jsonbRpc(data).motivo;
+    const vigente = await this.cierreSancion(fila.match_id);
+    if (motivo === 'applied') return { motivo: 'applied', fila: vigente };
+    if (motivo === 'lease') return { motivo: 'lease', fila: vigente };
+    return { motivo: 'actualizada', fila: vigente };
+  },
+  async partidosPendientesCierre(groupId, desdeIso, limite) {
+    const { data, error } = await db.from('group_messages')
+      .select('created_at, metadata')
+      .eq('group_id', groupId).eq('type', 'system')
+      .eq('metadata->>kind', 'match_closed')
+      .gte('created_at', desdeIso)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    err(error);
+    const porMatch = new Map<string, string>();
+    for (const row of (data || []) as { created_at?: string; metadata?: { match_id?: string } }[]) {
+      const id = row.metadata?.match_id;
+      const at = row.created_at;
+      if (!id || !at) continue;
+      const prev = porMatch.get(id);
+      if (!prev || at < prev) porMatch.set(id, at);
+    }
+    const ids = [...porMatch.keys()];
+    if (!ids.length) return [];
+    const { data: hechos, error: e2 } = await db.from('cierre_sanciones')
+      .select('match_id, status, processed_at').in('match_id', ids);
+    if (e2?.code === '42P01' || e2?.code === 'PGRST205') throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
+    err(e2);
+    const excluir = new Set<string>();
+    for (const r of (hechos || []) as { match_id: string; status?: string }[]) {
+      if (r.status === 'applied') excluir.add(r.match_id);
+    }
+    const candidatos = ids.filter((id) => !excluir.has(id));
+    if (!candidatos.length) return [];
+    const { data: partidos, error: e3 } = await db.from('matches').select('id, status').in('id', candidatos);
+    err(e3);
+    const vivos = new Set(((partidos || []) as { id: string; status: string | null }[])
+      .filter((p) => p.status !== 'cancelled').map((p) => p.id));
+    return candidatos
+      .filter((id) => vivos.has(id))
+      .map((id) => ({ id, cerrado_en: porMatch.get(id)! }))
+      .sort((a, b) => b.cerrado_en.localeCompare(a.cerrado_en))
+      .slice(0, limite);
   },
   async saldarDeuda(p) {
     const { data, error } = await db.rpc('saldar_deuda', {
