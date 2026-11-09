@@ -7,6 +7,8 @@
  * POST { accion: 'mapear', payment_id, user_id }      → alias pagador → jugador
  *      { accion: 'quitar_alias', alias_id }
  *      { accion: 'sancion_no_pago', match_id, user_id, confirmar: true }
+ *      { accion: 'aplicar_sanciones_cierre', match_id, confirmar: true }
+ *        Solo si SANCIONES_AL_CIERRE está en 1 o true. Misma lógica que el cron.
  *
  * MercadoPago: solo GET /v1/payments/search y GET /v1/payments/{id}, con
  * MP_ACCESS_TOKEN (server-only, nunca NEXT_PUBLIC_). Al navegador va solo
@@ -18,6 +20,9 @@ import { supabase as service } from '../../../../lib/supabase';
 import { buscarPagosAprobados, mpConfigurado, obtenerPago, MpError, MpNoConfigurado } from '../../../../lib/mp/client';
 import { repoSupabase } from '../../../../lib/mp/repo-supabase';
 import { ErrorPagos, estadoPagos, mapearPagador, sancionarNoPago, type Deps } from '../../../../lib/mp/servicio';
+import {
+  aplicarSancionesCierre, GRUPO_GALLETAS, NO_PAGAN_CANCHA, sancionesAlCierreActivas, vistaCierreSancion,
+} from '../../../../lib/mp/sanciones-cierre';
 import { mensajeDePagos } from '../../../../lib/cierre/datos';
 import { exigirMatchId } from '../../../../lib/mp/ids';
 import { asignarPagosADeudas, sancionHastaPagarActiva, ventanaConciliacion } from '../../../../lib/mp/deudas';
@@ -25,9 +30,9 @@ import { aPagoMp, esPagoDePichanga } from '../../../../lib/mp/pagos-mp';
 
 const ADMINS = ['bmadain@gmail.com', 'pablo.ibanezd@gmail.com'];
 // Titulares que no pagan la cancha (Barham organiza y es admin).
-const NO_PAGAN = ['bmadain@gmail.com'];
+const NO_PAGAN = [...NO_PAGAN_CANCHA];
 // Galletas + Ibáñez
-const GRUPO_ID = 'a812c96c-2193-41fe-b35a-a2b6159ed57f';
+const GRUPO_ID = GRUPO_GALLETAS;
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -53,6 +58,7 @@ function deps(): Deps {
       : null,
     ahora: () => new Date(),
     noPagan: NO_PAGAN,
+    sancionesAlCierre: sancionesAlCierreActivas(),
   };
 }
 
@@ -89,7 +95,20 @@ export async function GET(req: NextRequest) {
     const estado = await estadoPagos(d, GRUPO_ID, matchId);
     const extra = await extraDeudas(d);
     const mensaje = await mensajeDePagos(estado, GRUPO_ID, extra);
-    return NextResponse.json({ ...estado, ...mensaje, ...extra }, { headers: NO_STORE });
+    const sanciones_al_cierre = sancionesAlCierreActivas();
+    let cierre_sancion = null;
+    let cierre_sancion_aviso: string | null = null;
+    if (sanciones_al_cierre) {
+      try {
+        cierre_sancion = vistaCierreSancion(await d.repo.cierreSancion(estado.partido.id));
+      } catch (e) {
+        if (e instanceof ErrorPagos && e.status === 503) cierre_sancion_aviso = e.message;
+        else throw e;
+      }
+    }
+    return NextResponse.json({
+      ...estado, ...mensaje, ...extra, sanciones_al_cierre, cierre_sancion, cierre_sancion_aviso,
+    }, { headers: NO_STORE });
   } catch (e) { return fallo(e); }
 }
 
@@ -114,6 +133,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(await sancionarNoPago(d, GRUPO_ID, {
           match_id: matchId, user_id: String(body.user_id || ''), confirmar: body.confirmar,
         }, adminId));
+      }
+      case 'aplicar_sanciones_cierre': {
+        if (!sancionesAlCierreActivas()) return NextResponse.json({ ok: true, omitido: true });
+        if (body.confirmar !== true) throw new ErrorPagos('falta confirmación explícita');
+        const matchId = String(body.match_id || '');
+        exigirMatchId(matchId);
+        const r = await aplicarSancionesCierre(d, GRUPO_ID, matchId, { by: adminId, via: 'panel' });
+        return NextResponse.json({
+          ...r,
+          sancionados: (r.sancionados || []).map((s) => ({
+            nombre: s.nombre, estado: s.estado, deuda: s.deuda, ya_existia: s.ya_existia,
+          })),
+        });
       }
       case 'saldar_deuda': {
         // Salda player_debts. No toca player_sanctions ni fechas_pendientes: esas fechas ya ganadas se cumplen igual.

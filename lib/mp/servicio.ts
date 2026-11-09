@@ -18,6 +18,33 @@ export interface Partido {
 }
 export interface Sancion { user_id: string; applies_to: string; reason: string; note: string | null }
 
+/** Fila de public.cierre_sanciones (migración 043). match_id es la PK. */
+export type EstadoCierreSancion = 'applied' | 'skipped_incomplete' | 'alert';
+
+export interface CierreSancionSnapshot {
+  cierre_en?: string | null;
+  fecha_sancion?: string;
+  fecha_partido?: string;
+  via?: 'cron' | 'panel';
+  mp_incompleto?: boolean;
+  historial_incompleto?: boolean;
+  configurado?: boolean;
+  solapes?: { user_id: string; nombre: string }[];
+  al_dia?: { user_id: string; nombre: string }[];
+  sancionados?: { user_id: string; nombre: string; estado: 'no_pagado' | 'pagado_tarde'; deuda: boolean; ya_existia?: boolean }[];
+  conflictos?: { user_id: string; nombre: string; reason: string }[];
+}
+
+export interface CierreSancionFila {
+  match_id: string;
+  group_id: string;
+  processed_at: string;
+  processed_by: string | null;
+  snapshot: CierreSancionSnapshot;
+  status: EstadoCierreSancion;
+  note: string | null;
+}
+
 export interface PagosRepo {
   partidosRecientes(groupId: string, limite: number): Promise<Partido[]>;
   partido(matchId: string): Promise<Partido | null>;
@@ -59,6 +86,18 @@ export interface PagosRepo {
   deudas(groupId: string): Promise<{ id: string; user_id: string; match_id: string; fecha: string; nombre: string; status: 'activa' | 'saldada' | 'condonada'; mp_payment_id: string | null }[]>;
   registrarDeuda(p: { match_id: string; user_id: string; created_by: string | null }): Promise<{ ok: boolean; omitida?: boolean }>;
   saldarDeuda(p: { debt_id: string; via: 'mp' | 'manual'; settled_at?: string | null; mp_payment_id?: string | null; by?: string | null }): Promise<{ ok: boolean; ya_saldada?: boolean }>;
+  /** Fila de cierre_sanciones, o null si ese partido todavía no se procesó. */
+  cierreSancion(matchId: string): Promise<CierreSancionFila | null>;
+  /**
+   * Inserta o actualiza cierre_sanciones. Si la fila ya está `applied`,
+   * no la pisa. No escribe en matches.
+   */
+  guardarCierreSancion(fila: Omit<CierreSancionFila, 'processed_at'> & { processed_at?: string }): Promise<CierreSancionFila>;
+  /**
+   * Partidos con mensaje match_closed, sin fila en cierre_sanciones,
+   * no cancelados, cuyo cierre es >= desdeIso. Más recientes primero.
+   */
+  partidosPendientesCierre(groupId: string, desdeIso: string, limite: number): Promise<{ id: string; cerrado_en: string }[]>;
 }
 
 export interface MpLector {
@@ -75,9 +114,14 @@ export interface Deps {
   noPagan: string[];
   /**
    * Sanción hasta pagar (041). Si no viene, se lee SANCION_HASTA_PAGAR.
-   * Apagado: no se llama registrar_deuda_no_pago.
+   * Apagado: no se llama registrar_deuda_no_pago desde el botón de una persona.
    */
   sancionHastaPagar?: boolean;
+  /**
+   * Sanciones automáticas al cierre. Si no viene, se lee SANCIONES_AL_CIERRE.
+   * Apagado: el cron y el botón no escriben sanciones, deudas ni cierre_sanciones.
+   */
+  sancionesAlCierre?: boolean;
 }
 
 export class ErrorPagos extends Error {

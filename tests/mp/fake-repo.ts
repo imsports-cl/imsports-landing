@@ -1,11 +1,15 @@
 import type { AliasPagador, Titular } from '../../lib/mp/cruce';
-import { inicioPartido, type Partido, type PagosRepo, type Sancion } from '../../lib/mp/servicio';
+import { inicioPartido, type CierreSancionFila, type Partido, type PagosRepo, type Sancion } from '../../lib/mp/servicio';
 
 /** BD en memoria. Reproduce el UNIQUE (group_id, user_id, applies_to) de player_sanctions. */
-export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string>; convocatorias?: Record<string, string | null> }) {
+export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string>; convocatorias?: Record<string, string | null>; cierreSanciones?: CierreSancionFila[] }) {
   const sanciones = [...(init.sanciones || [])];
   const aliases = [...(init.aliases || [])];
   const inserts: any[] = [];
+  const deudas: { match_id: string; user_id: string; created_by: string | null }[] = [];
+  const cierreFilas: CierreSancionFila[] = [...(init.cierreSanciones || [])];
+  /** Tablas escritas. Nunca debe aparecer `matches`. */
+  const escrituras: string[] = [];
   const miembros = init.miembros || Object.values(init.titulares).flat().map((t) => ({ user_id: t.user_id, nombre: t.nombre }));
   const repo: PagosRepo = {
     async partidosRecientes(g, n) { return init.partidos.filter((p) => p.group_id === g).sort((a, b) => b.date.localeCompare(a.date)).slice(0, n); },
@@ -61,6 +65,7 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
         throw Object.assign(new Error('duplicate key'), { code: '23505' });
       }
       sanciones.push(s); inserts.push(s);
+      escrituras.push('player_sanctions');
     },
     async guardarAlias(a) {
       for (let i = aliases.length - 1; i >= 0; i--) {
@@ -71,8 +76,36 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
     },
     async borrarAlias(g, id) { const i = aliases.findIndex((a) => a.group_id === g && a.id === id); if (i >= 0) aliases.splice(i, 1); },
     async deudas() { return []; },
-    async registrarDeuda() { return { ok: true }; },
+    async registrarDeuda(p) {
+      deudas.push(p);
+      escrituras.push('player_debts');
+      return { ok: true };
+    },
     async saldarDeuda() { return { ok: true }; },
+    async cierreSancion(matchId) {
+      const fila = cierreFilas.find((f) => f.match_id === matchId);
+      return fila ? { ...fila, snapshot: { ...fila.snapshot } } : null;
+    },
+    async guardarCierreSancion(fila) {
+      escrituras.push('cierre_sanciones');
+      const processed_at = fila.processed_at || new Date().toISOString();
+      const i = cierreFilas.findIndex((f) => f.match_id === fila.match_id);
+      if (i >= 0 && cierreFilas[i].status === 'applied') return { ...cierreFilas[i], snapshot: { ...cierreFilas[i].snapshot } };
+      const row: CierreSancionFila = { ...fila, processed_at, snapshot: fila.snapshot };
+      if (i >= 0) cierreFilas[i] = row;
+      else cierreFilas.push(row);
+      return { ...row, snapshot: { ...row.snapshot } };
+    },
+    async partidosPendientesCierre(groupId, desdeIso, limite) {
+      const desde = Date.parse(desdeIso);
+      const ya = new Set(cierreFilas.map((f) => f.match_id));
+      return init.partidos
+        .filter((p) => p.group_id === groupId && p.status !== 'cancelled' && init.cierres?.[p.id] && !ya.has(p.id))
+        .map((p) => ({ id: p.id, cerrado_en: init.cierres![p.id] }))
+        .filter((p) => Date.parse(p.cerrado_en) >= desde)
+        .sort((a, b) => b.cerrado_en.localeCompare(a.cerrado_en))
+        .slice(0, limite);
+    },
   };
-  return { repo, sanciones, aliases, inserts };
+  return { repo, sanciones, aliases, inserts, deudas, cierreFilas, escrituras };
 }

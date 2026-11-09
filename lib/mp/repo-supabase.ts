@@ -4,7 +4,10 @@
 import 'server-only';
 import { supabase as db } from '../supabase';
 import { exigirMatchId } from './ids';
-import { inicioPartido, ErrorPagos, TITULARES_INCOMPLETO, type PagosRepo, type Partido } from './servicio';
+import {
+  inicioPartido, ErrorPagos, TITULARES_INCOMPLETO,
+  type CierreSancionFila, type CierreSancionSnapshot, type PagosRepo, type Partido,
+} from './servicio';
 
 const PARTIDO = 'id, group_id, date, time, price, status, phase, created_at';
 
@@ -14,6 +17,25 @@ function err(e: any) {
   const x: any = new Error(e.message || 'error de base de datos');
   x.code = e.code;
   throw x;
+}
+
+function filaCierre(raw: {
+  match_id: string; group_id: string; processed_at: string; processed_by?: string | null;
+  snapshot?: CierreSancionSnapshot | string | null; status: CierreSancionFila['status']; note?: string | null;
+}): CierreSancionFila {
+  let snapshot: CierreSancionSnapshot = {};
+  if (typeof raw.snapshot === 'string') {
+    try { snapshot = JSON.parse(raw.snapshot) as CierreSancionSnapshot; } catch { snapshot = {}; }
+  } else if (raw.snapshot && typeof raw.snapshot === 'object') snapshot = raw.snapshot;
+  return {
+    match_id: raw.match_id,
+    group_id: raw.group_id,
+    processed_at: raw.processed_at,
+    processed_by: raw.processed_by ?? null,
+    snapshot,
+    status: raw.status,
+    note: raw.note ?? null,
+  };
 }
 
 export const repoSupabase: PagosRepo = {
@@ -229,6 +251,94 @@ export const repoSupabase: PagosRepo = {
     if (error?.code === 'PGRST202' || error?.code === '42883' || error?.code === '42P01') return { ok: false, omitida: true };
     if (error) throw Object.assign(new Error(error.message), { code: error.code });
     return { ok: true };
+  },
+  async cierreSancion(matchId) {
+    const { data, error } = await db.from('cierre_sanciones')
+      .select('match_id, group_id, processed_at, processed_by, snapshot, status, note')
+      .eq('match_id', matchId).maybeSingle();
+    if (error?.code === '42P01' || error?.code === 'PGRST205') {
+      throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
+    }
+    err(error);
+    if (!data) return null;
+    return filaCierre(data);
+  },
+  async guardarCierreSancion(fila) {
+    // Solo cierre_sanciones. matches no se toca.
+    const processed_at = fila.processed_at || new Date().toISOString();
+    const row = {
+      match_id: fila.match_id,
+      group_id: fila.group_id,
+      processed_at,
+      processed_by: fila.processed_by,
+      snapshot: fila.snapshot,
+      status: fila.status,
+      note: fila.note,
+    };
+    const { data: prev, error: e0 } = await db.from('cierre_sanciones')
+      .select('status').eq('match_id', fila.match_id).maybeSingle();
+    if (e0?.code === '42P01' || e0?.code === 'PGRST205') throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
+    err(e0);
+    if ((prev as { status?: string } | null)?.status === 'applied') {
+      const vigente = await this.cierreSancion(fila.match_id);
+      if (!vigente) throw new ErrorPagos('no se pudo leer cierre_sanciones', 503);
+      return vigente;
+    }
+    if (!prev) {
+      const { error } = await db.from('cierre_sanciones').insert(row);
+      if (error?.code === '23505') {
+        const vigente = await this.cierreSancion(fila.match_id);
+        if (vigente?.status === 'applied') return vigente;
+      } else {
+        err(error);
+        return filaCierre(row);
+      }
+    }
+    const { error } = await db.from('cierre_sanciones').update({
+      group_id: row.group_id,
+      processed_at: row.processed_at,
+      processed_by: row.processed_by,
+      snapshot: row.snapshot,
+      status: row.status,
+      note: row.note,
+    }).eq('match_id', fila.match_id).neq('status', 'applied');
+    err(error);
+    return (await this.cierreSancion(fila.match_id)) || filaCierre(row);
+  },
+  async partidosPendientesCierre(groupId, desdeIso, limite) {
+    const { data, error } = await db.from('group_messages')
+      .select('created_at, metadata')
+      .eq('group_id', groupId).eq('type', 'system')
+      .eq('metadata->>kind', 'match_closed')
+      .gte('created_at', desdeIso)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    err(error);
+    const porMatch = new Map<string, string>();
+    for (const row of (data || []) as { created_at?: string; metadata?: { match_id?: string } }[]) {
+      const id = row.metadata?.match_id;
+      const at = row.created_at;
+      if (!id || !at) continue;
+      const prev = porMatch.get(id);
+      if (!prev || at < prev) porMatch.set(id, at);
+    }
+    const ids = [...porMatch.keys()];
+    if (!ids.length) return [];
+    const { data: hechos, error: e2 } = await db.from('cierre_sanciones').select('match_id').in('match_id', ids);
+    if (e2?.code === '42P01' || e2?.code === 'PGRST205') throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
+    err(e2);
+    const ya = new Set(((hechos || []) as { match_id: string }[]).map((r) => r.match_id));
+    const candidatos = ids.filter((id) => !ya.has(id));
+    if (!candidatos.length) return [];
+    const { data: partidos, error: e3 } = await db.from('matches').select('id, status').in('id', candidatos);
+    err(e3);
+    const vivos = new Set(((partidos || []) as { id: string; status: string | null }[])
+      .filter((p) => p.status !== 'cancelled').map((p) => p.id));
+    return candidatos
+      .filter((id) => vivos.has(id))
+      .map((id) => ({ id, cerrado_en: porMatch.get(id)! }))
+      .sort((a, b) => b.cerrado_en.localeCompare(a.cerrado_en))
+      .slice(0, limite);
   },
   async saldarDeuda(p) {
     const { data, error } = await db.rpc('saldar_deuda', {
