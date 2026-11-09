@@ -3,6 +3,7 @@
  */
 import 'server-only';
 import { supabase as db } from '../supabase';
+import { validarSnapshotCierre043 } from './cierre-043';
 import { exigirMatchId } from './ids';
 import {
   inicioPartido, ErrorPagos, TITULARES_INCOMPLETO,
@@ -26,6 +27,7 @@ function snapshotCierre(raw: unknown): CierreSancionSnapshot {
     user_id: String(x.user_id || ''),
     nombre: String(x.nombre || ''),
     estado: x.estado === 'pagado' || x.estado === 'pagado_tarde' ? x.estado : 'no_pagado',
+    pagado: x.pagado === true,
     sancion: Boolean(x.sancion),
     deuda: Boolean(x.deuda),
   }));
@@ -279,6 +281,7 @@ export const repoSupabase: PagosRepo = {
     return filaCierre(data);
   },
   async reclamarCierre(p) {
+    validarSnapshotCierre043(p.status, p.snapshot);
     const { data, error } = await db.rpc('registrar_cierre_sanciones', {
       p_match_id: p.match_id,
       p_processed_by: p.processed_by,
@@ -289,10 +292,12 @@ export const repoSupabase: PagosRepo = {
     if (error?.code === '42P01' || error?.code === 'PGRST205' || error?.code === 'PGRST202' || error?.code === '42883') {
       throw new ErrorPagos('falta registrar_cierre_sanciones', 503);
     }
+    if (error?.code === '23514') throw new ErrorPagos('falta permitir status processing (migración 044)', 503);
     if (error) throw Object.assign(new Error(error.message), { code: error.code });
     return { creada: creadaDe(data) };
   },
   async guardarCierreSancion(fila, opts) {
+    validarSnapshotCierre043(fila.status, fila.snapshot);
     // Solo cierre_sanciones. matches no se toca.
     const processed_at = fila.processed_at || new Date().toISOString();
     const row = {
@@ -336,7 +341,7 @@ export const repoSupabase: PagosRepo = {
     err(error);
     return (await this.cierreSancion(fila.match_id)) || filaCierre(row);
   },
-  async partidosPendientesCierre(groupId, desdeIso, limite) {
+  async partidosPendientesCierre(groupId, desdeIso, limite, reintentoAntesIso) {
     const { data, error } = await db.from('group_messages')
       .select('created_at, metadata')
       .eq('group_id', groupId).eq('type', 'system')
@@ -355,11 +360,17 @@ export const repoSupabase: PagosRepo = {
     }
     const ids = [...porMatch.keys()];
     if (!ids.length) return [];
-    const { data: hechos, error: e2 } = await db.from('cierre_sanciones').select('match_id').in('match_id', ids);
+    const { data: hechos, error: e2 } = await db.from('cierre_sanciones')
+      .select('match_id, status, processed_at').in('match_id', ids);
     if (e2?.code === '42P01' || e2?.code === 'PGRST205') throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
     err(e2);
-    const ya = new Set(((hechos || []) as { match_id: string }[]).map((r) => r.match_id));
-    const candidatos = ids.filter((id) => !ya.has(id));
+    const corte = reintentoAntesIso ? Date.parse(reintentoAntesIso) : 0;
+    const excluir = new Set<string>();
+    for (const r of (hechos || []) as { match_id: string; status?: string; processed_at?: string }[]) {
+      if (r.status === 'applied') excluir.add(r.match_id);
+      else if (r.status === 'processing' && Date.parse(r.processed_at || '') >= corte) excluir.add(r.match_id);
+    }
+    const candidatos = ids.filter((id) => !excluir.has(id));
     if (!candidatos.length) return [];
     const { data: partidos, error: e3 } = await db.from('matches').select('id, status').in('id', candidatos);
     err(e3);

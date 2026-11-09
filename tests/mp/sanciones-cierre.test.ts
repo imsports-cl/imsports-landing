@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Titular } from '../../lib/mp/cruce';
 import type { PagoMpRaw } from '../../lib/mp/pagos-mp';
+import { validarSnapshotCierre043, ESTADOS_CIERRE_043 } from '../../lib/mp/cierre-043';
 import {
   aplicarSancionesCierre,
   correrSancionesCierre,
@@ -197,6 +198,7 @@ test('2-nov: aplica no_pago a Chino, Chipi, Esteban y Gonzalo y la deuda', async
   assert.equal(db.cierreFilas[0].status, 'applied');
   assert.equal(db.cierreFilas[0].processed_by, `admin:${ADMIN}`);
   assert.ok(Array.isArray(db.cierreFilas[0].snapshot));
+  assert.ok(db.cierreFilas[0].snapshot.every((s) => s.pagado === (s.estado === 'pagado')));
   assert.equal(db.escrituras.indexOf('cierre_sanciones') < db.escrituras.indexOf('player_sanctions'), true);
   assert.equal(db.inserts[0].created_by, ADMIN);
   assert.ok(db.escrituras.every((t) => t === 'player_sanctions' || t === 'player_debts' || t === 'cierre_sanciones'));
@@ -429,6 +431,90 @@ test('L3: no hay deudas ni sanciones de un cierre anterior al 2026-11-09', async
   const si = await correrSancionesCierre(sigue.d, new Date('2026-11-10T15:00:00.000Z'));
   assert.deepEqual(si.resultados.map((x) => x.match_id), [MATCH]);
   assert.equal(sigue.db.inserts.length, 4);
+});
+
+test('043: applied sin pagado es P0001, igual que el RPC', async () => {
+  assert.throws(
+    () => validarSnapshotCierre043('applied', [{ user_id: 'u-chino', nombre: 'Chino', estado: 'no_pagado', sancion: true, deuda: true }]),
+    (e: any) => e.code === 'P0001' && e.message === 'cada titular necesita user_id y pagado',
+  );
+  validarSnapshotCierre043('applied', [{ user_id: 'u-chino', pagado: false }]);
+  validarSnapshotCierre043('processing', [{ user_id: 'u-chino' }]);
+  assert.deepEqual([...ESTADOS_CIERRE_043], ['applied', 'skipped_incomplete', 'alert']);
+
+  const { d, db } = armar();
+  await assert.rejects(
+    d.repo.reclamarCierre({
+      match_id: MATCH, group_id: GRUPO, processed_by: 'cron', status: 'applied', note: null,
+      snapshot: [{ user_id: 'u-chino', nombre: 'Chino', estado: 'no_pagado', sancion: true, deuda: false, pagado: undefined as unknown as boolean }],
+    }),
+    (e: any) => e.code === 'P0001',
+  );
+  assert.equal(db.cierreFilas.length, 0);
+  const ok = await aplicarSancionesCierre(d, GRUPO, MATCH, actor);
+  assert.equal(ok.status, 'applied');
+  assert.equal(db.cierreFilas[0].status, 'applied');
+  assert.ok(db.cierreFilas.some((f) => f.status === 'applied'));
+  const reclamos = db.escrituras.filter((t) => t === 'cierre_sanciones');
+  assert.ok(reclamos.length >= 1);
+});
+
+test('reintento: processing no queda applied a medias y no duplica', async () => {
+  const { d, db } = armar();
+  const original = d.repo.insertarSancion.bind(d.repo);
+  let n = 0;
+  d.repo.insertarSancion = async (s) => {
+    n += 1;
+    if (n === 1) throw Object.assign(new Error('corte'), { code: 'XX000' });
+    return original(s);
+  };
+  await assert.rejects(aplicarSancionesCierre(d, GRUPO, MATCH, actor));
+  assert.equal(db.cierreFilas[0].status, 'alert');
+  assert.match(db.cierreFilas[0].note || '', /0 sanciones y 0 deudas/);
+  assert.equal(db.inserts.length, 0);
+
+  const listo = await aplicarSancionesCierre(d, GRUPO, MATCH, actor);
+  assert.equal(listo.status, 'applied');
+  assert.equal(db.inserts.length, 4);
+  assert.equal(db.deudas.length, 4);
+  const otra = await aplicarSancionesCierre(d, GRUPO, MATCH, actor);
+  assert.equal(otra.ya_aplicado, true);
+  assert.equal(db.inserts.length, 4);
+  assert.equal(db.deudas.length, 4);
+});
+
+test('cron retoma processing viejo y alert; deja el processing fresco', async () => {
+  const ahora = new Date('2026-11-09T15:00:00.000Z');
+  const fresco = armar();
+  fresco.d.ahora = () => ahora;
+  fresco.db.cierreFilas.push({
+    match_id: MATCH, group_id: GRUPO, processed_by: 'cron', status: 'processing', note: 'Cierre en curso.',
+    processed_at: ahora.toISOString(), snapshot: [],
+  });
+  const quieto = await correrSancionesCierre(fresco.d, ahora);
+  assert.deepEqual(quieto.resultados, []);
+  assert.equal(fresco.db.inserts.length, 0);
+
+  const viejo = armar();
+  viejo.d.ahora = () => ahora;
+  viejo.db.cierreFilas.push({
+    match_id: MATCH, group_id: GRUPO, processed_by: 'cron', status: 'processing', note: 'Cierre en curso.',
+    processed_at: new Date(ahora.getTime() - 11 * 60 * 1000).toISOString(), snapshot: [],
+  });
+  const seguido = await correrSancionesCierre(viejo.d, ahora);
+  assert.equal(seguido.resultados[0]?.status, 'applied');
+  assert.equal(viejo.db.inserts.length, 4);
+
+  const alerta = armar();
+  alerta.d.ahora = () => ahora;
+  alerta.db.cierreFilas.push({
+    match_id: MATCH, group_id: GRUPO, processed_by: `admin:${ADMIN}`, status: 'alert',
+    note: 'Escritura incompleta: quedaron 0 sanciones y 0 deudas. Se puede reintentar.',
+    processed_at: ahora.toISOString(), snapshot: [],
+  });
+  const button = await aplicarSancionesCierre(alerta.d, GRUPO, MATCH, actor);
+  assert.equal(button.status, 'applied');
+  assert.equal(alerta.db.inserts.length, 4);
 });
 
 test('L4: sin SANCION_HASTA_PAGAR solo queda la fecha', async () => {

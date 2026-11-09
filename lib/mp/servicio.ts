@@ -18,14 +18,19 @@ export interface Partido {
 }
 export interface Sancion { user_id: string; applies_to: string; reason: string; note: string | null }
 
-/** Fila de public.cierre_sanciones (migración 043). match_id es la PK. */
-export type EstadoCierreSancion = 'applied' | 'skipped_incomplete' | 'alert';
+/**
+ * Fila de public.cierre_sanciones. La 043 permite applied | skipped_incomplete | alert.
+ * `processing` no está en ese CHECK: lo agrega la 044 (no aplicada en este repo).
+ */
+export type EstadoCierreSancion = 'processing' | 'applied' | 'skipped_incomplete' | 'alert';
 
-/** La 043 guarda el snapshot como arreglo, no como objeto. */
+/** La 043 guarda el snapshot como arreglo. En applied cada fila trae user_id y pagado. */
 export interface CierreSnapshotItem {
   user_id: string;
   nombre: string;
   estado: 'pagado' | 'pagado_tarde' | 'no_pagado';
+  /** true solo si el pago fue a tiempo. Lo exige la 043 en un claim applied. */
+  pagado: boolean;
   sancion: boolean;
   deuda: boolean;
 }
@@ -111,7 +116,11 @@ export interface PagosRepo {
    * Partidos con mensaje match_closed, sin fila en cierre_sanciones,
    * no cancelados, cuyo cierre es >= desdeIso. Más recientes primero.
    */
-  partidosPendientesCierre(groupId: string, desdeIso: string, limite: number): Promise<{ id: string; cerrado_en: string }[]>;
+  /**
+   * Cierres >= desdeIso sin fila applied. Reintenta alert, skipped_incomplete
+   * y processing con processed_at anterior a reintentoAntesIso.
+   */
+  partidosPendientesCierre(groupId: string, desdeIso: string, limite: number, reintentoAntesIso?: string): Promise<{ id: string; cerrado_en: string }[]>;
 }
 
 export interface MpLector {

@@ -42,7 +42,7 @@ interface Datos {
   /** Flag SANCIONES_AL_CIERRE. Apagado: no hay botón. */
   sanciones_al_cierre?: boolean;
   cierre_sancion?: {
-    status: 'applied' | 'skipped_incomplete' | 'alert';
+    status: 'processing' | 'applied' | 'skipped_incomplete' | 'alert';
     note: string | null;
     processed_at: string;
     sancionados: { nombre: string; estado: 'no_pagado' | 'pagado_tarde'; deuda: boolean }[];

@@ -1,4 +1,5 @@
 import type { AliasPagador, Titular } from '../../lib/mp/cruce';
+import { validarSnapshotCierre043 } from '../../lib/mp/cierre-043';
 import { inicioPartido, type CierreSancionFila, type Partido, type PagosRepo, type Sancion } from '../../lib/mp/servicio';
 
 /** BD en memoria. Reproduce el UNIQUE (group_id, user_id, applies_to) de player_sanctions. */
@@ -75,8 +76,14 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
       aliases.push({ ...a, id: `a-${aliases.length + 1}` });
     },
     async borrarAlias(g, id) { const i = aliases.findIndex((a) => a.group_id === g && a.id === id); if (i >= 0) aliases.splice(i, 1); },
-    async deudas() { return []; },
+    async deudas() {
+      return deudas.map((d, i) => ({
+        id: `d-${i}`, user_id: d.user_id, match_id: d.match_id, fecha: '', nombre: 'Jugador',
+        status: 'activa' as const, mp_payment_id: null,
+      }));
+    },
     async registrarDeuda(p) {
+      if (deudas.some((d) => d.match_id === p.match_id && d.user_id === p.user_id)) return { ok: true };
       deudas.push(p);
       escrituras.push('player_debts');
       return { ok: true };
@@ -87,6 +94,7 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
       return fila ? { ...fila, snapshot: fila.snapshot.map((x) => ({ ...x })) } : null;
     },
     async reclamarCierre(p) {
+      validarSnapshotCierre043(p.status, p.snapshot);
       const i = cierreFilas.findIndex((f) => f.match_id === p.match_id);
       if (i >= 0) return { creada: false };
       escrituras.push('cierre_sanciones');
@@ -97,6 +105,7 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
       return { creada: true };
     },
     async guardarCierreSancion(fila, opts) {
+      validarSnapshotCierre043(fila.status, fila.snapshot);
       escrituras.push('cierre_sanciones');
       const processed_at = fila.processed_at || new Date().toISOString();
       const i = cierreFilas.findIndex((f) => f.match_id === fila.match_id);
@@ -108,11 +117,16 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
       else cierreFilas.push(row);
       return { ...row, snapshot: row.snapshot.map((x) => ({ ...x })) };
     },
-    async partidosPendientesCierre(groupId, desdeIso, limite) {
+    async partidosPendientesCierre(groupId, desdeIso, limite, reintentoAntesIso) {
       const desde = Date.parse(desdeIso);
-      const ya = new Set(cierreFilas.map((f) => f.match_id));
+      const corte = reintentoAntesIso ? Date.parse(reintentoAntesIso) : 0;
+      const excluir = new Set(cierreFilas.filter((f) => {
+        if (f.status === 'applied') return true;
+        if (f.status === 'processing' && Date.parse(f.processed_at) >= corte) return true;
+        return false;
+      }).map((f) => f.match_id));
       return init.partidos
-        .filter((p) => p.group_id === groupId && p.status !== 'cancelled' && init.cierres?.[p.id] && !ya.has(p.id))
+        .filter((p) => p.group_id === groupId && p.status !== 'cancelled' && init.cierres?.[p.id] && !excluir.has(p.id))
         .map((p) => ({ id: p.id, cerrado_en: init.cierres![p.id] }))
         .filter((p) => Date.parse(p.cerrado_en) >= desde)
         .sort((a, b) => b.cerrado_en.localeCompare(a.cerrado_en))
