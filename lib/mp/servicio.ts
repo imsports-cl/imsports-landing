@@ -21,25 +21,23 @@ export interface Sancion { user_id: string; applies_to: string; reason: string; 
 /** Fila de public.cierre_sanciones (migración 043). match_id es la PK. */
 export type EstadoCierreSancion = 'applied' | 'skipped_incomplete' | 'alert';
 
-export interface CierreSancionSnapshot {
-  cierre_en?: string | null;
-  fecha_sancion?: string;
-  fecha_partido?: string;
-  via?: 'cron' | 'panel';
-  mp_incompleto?: boolean;
-  historial_incompleto?: boolean;
-  configurado?: boolean;
-  solapes?: { user_id: string; nombre: string }[];
-  al_dia?: { user_id: string; nombre: string }[];
-  sancionados?: { user_id: string; nombre: string; estado: 'no_pagado' | 'pagado_tarde'; deuda: boolean; ya_existia?: boolean }[];
-  conflictos?: { user_id: string; nombre: string; reason: string }[];
+/** La 043 guarda el snapshot como arreglo, no como objeto. */
+export interface CierreSnapshotItem {
+  user_id: string;
+  nombre: string;
+  estado: 'pagado' | 'pagado_tarde' | 'no_pagado';
+  sancion: boolean;
+  deuda: boolean;
 }
+
+export type CierreSancionSnapshot = CierreSnapshotItem[];
 
 export interface CierreSancionFila {
   match_id: string;
   group_id: string;
   processed_at: string;
-  processed_by: string | null;
+  /** 'cron' o 'admin:<uuid>'. Lo exige el CHECK de la 043. */
+  processed_by: string;
   snapshot: CierreSancionSnapshot;
   status: EstadoCierreSancion;
   note: string | null;
@@ -89,10 +87,26 @@ export interface PagosRepo {
   /** Fila de cierre_sanciones, o null si ese partido todavía no se procesó. */
   cierreSancion(matchId: string): Promise<CierreSancionFila | null>;
   /**
-   * Inserta o actualiza cierre_sanciones. Si la fila ya está `applied`,
-   * no la pisa. No escribe en matches.
+   * Reclamo atómico vía RPC registrar_cierre_sanciones (043).
+   * creada false: la fila ya existía; el llamador no debe escribir sanciones ni deudas.
    */
-  guardarCierreSancion(fila: Omit<CierreSancionFila, 'processed_at'> & { processed_at?: string }): Promise<CierreSancionFila>;
+  reclamarCierre(p: {
+    match_id: string;
+    group_id: string;
+    processed_by: string;
+    snapshot: CierreSancionSnapshot;
+    status: EstadoCierreSancion;
+    note: string | null;
+  }): Promise<{ creada: boolean }>;
+  /**
+   * Actualiza cierre_sanciones. Si ya está `applied`, no la baja
+   * salvo opts.forzar (un fallo de escritura no puede dejarla applied).
+   * No escribe en matches.
+   */
+  guardarCierreSancion(
+    fila: Omit<CierreSancionFila, 'processed_at'> & { processed_at?: string },
+    opts?: { forzar?: boolean },
+  ): Promise<CierreSancionFila>;
   /**
    * Partidos con mensaje match_closed, sin fila en cierre_sanciones,
    * no cancelados, cuyo cierre es >= desdeIso. Más recientes primero.
@@ -122,6 +136,11 @@ export interface Deps {
    * Apagado: el cron y el botón no escriben sanciones, deudas ni cierre_sanciones.
    */
   sancionesAlCierre?: boolean;
+  /**
+   * No procesar cierres anteriores a este instante (ISO o YYYY-MM-DD).
+   * Si no viene, se lee SANCIONES_AL_CIERRE_DESDE o el 2026-11-09.
+   */
+  sancionesAlCierreDesde?: string;
 }
 
 export class ErrorPagos extends Error {

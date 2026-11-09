@@ -13,6 +13,7 @@ import {
   correrSancionesCierre,
   cronAutorizado,
   GRUPO_GALLETAS,
+  instanteDesdeCierre,
   planSancionesCierre,
   sancionesAlCierreActivas,
   type TitularAlCierre,
@@ -54,6 +55,8 @@ function armar(opts: {
   titulares?: Record<string, Titular[]>;
   sanciones?: { group_id: string; user_id: string; applies_to: string; reason: string; note: string | null }[];
   mp?: Deps['mp'] | null;
+  hastaPagar?: boolean;
+  desde?: string;
 } = {}) {
   const pagos = opts.pagos ?? TITULARES_2NOV
     .filter((t) => t.estado === 'pagado')
@@ -86,11 +89,14 @@ function armar(opts: {
     ahora: () => new Date(AHORA),
     noPagan: [],
     sancionesAlCierre: true,
+    sancionHastaPagar: opts.hastaPagar !== false,
+    sancionesAlCierreDesde: opts.desde === undefined ? '2026-11-01' : opts.desde,
   };
   return { d, db, lecturas: () => lecturasMp };
 }
 
-const actor = { by: 'admin-1', via: 'panel' as const };
+const ADMIN = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const actor = { by: ADMIN, via: 'panel' as const };
 const sinCorreo = (v: unknown) => {
   const s = JSON.stringify(v);
   assert.equal(s.includes('@'), false, s);
@@ -123,20 +129,26 @@ test('plan 2-nov: Chino, Chipi, Esteban y Gonzalo, con deuda', () => {
     cierreEn: CIERRE,
     fechaSancion: '2026-11-09',
     fechaPartido: '2026-11-02',
+    sancionHastaPagar: true,
     titulares: TITULARES_2NOV.map((t): TitularAlCierre => ({
       user_id: t.user_id!, nombre: t.nombre, estado: t.estado,
     })),
   });
   assert.equal(plan.status, 'applied');
+  assert.ok(Array.isArray(plan.snapshot));
   assert.deepEqual(plan.sancionables.map((s) => s.nombre), ESPERADOS);
   assert.ok(plan.sancionables.every((s) => s.estado === 'no_pagado' && s.deuda));
+  assert.deepEqual(
+    plan.snapshot.filter((s) => s.sancion).map((s) => s.nombre),
+    ESPERADOS,
+  );
   sinCorreo(plan);
 });
 
 test('plan: pagó tarde sanciona la fecha y no la deuda; solape o incompleto no sancionan', () => {
   const base = {
     cerrado: true, configurado: true, mpIncompleto: false, historialIncompleto: false,
-    cierreEn: CIERRE, fechaSancion: '2026-11-09', fechaPartido: '2026-11-02',
+    cierreEn: CIERRE, fechaSancion: '2026-11-09', fechaPartido: '2026-11-02', sancionHastaPagar: true,
   };
   const tarde = planSancionesCierre({
     ...base,
@@ -179,11 +191,14 @@ test('2-nov: aplica no_pago a Chino, Chipi, Esteban y Gonzalo y la deuda', async
   assert.deepEqual(r.sancionados!.map((s) => s.nombre), ESPERADOS);
   assert.ok(r.sancionados!.every((s) => s.deuda && s.estado === 'no_pagado'));
   assert.equal(db.inserts.length, 4);
-  assert.ok(db.inserts.every((s) => s.reason === 'no_pago' && s.applies_to === '2026-11-09' && s.created_by === 'admin-1'));
+  assert.ok(db.inserts.every((s) => s.reason === 'no_pago' && s.applies_to === '2026-11-09' && s.created_by === ADMIN));
   assert.deepEqual(db.deudas.map((x) => x.user_id).sort(), ['u-chino', 'u-chipi', 'u-esteban', 'u-gonzalo']);
   assert.equal(db.cierreFilas.length, 1);
   assert.equal(db.cierreFilas[0].status, 'applied');
-  assert.equal(db.cierreFilas[0].processed_by, 'admin-1');
+  assert.equal(db.cierreFilas[0].processed_by, `admin:${ADMIN}`);
+  assert.ok(Array.isArray(db.cierreFilas[0].snapshot));
+  assert.equal(db.escrituras.indexOf('cierre_sanciones') < db.escrituras.indexOf('player_sanctions'), true);
+  assert.equal(db.inserts[0].created_by, ADMIN);
   assert.ok(db.escrituras.every((t) => t === 'player_sanctions' || t === 'player_debts' || t === 'cierre_sanciones'));
   sinCorreo({ r, inserts: db.inserts, filas: db.cierreFilas, deudas: db.deudas });
 
@@ -257,6 +272,7 @@ test('pago en solape: alerta y no sanciona a nadie', async () => {
     ahora: () => new Date('2026-11-05T15:00:00.000Z'),
     noPagan: [],
     sancionesAlCierre: true,
+    sancionesAlCierreDesde: '2026-11-01',
   };
   const r = await aplicarSancionesCierre(d, GRUPO, MATCH, actor);
   assert.equal(r.status, 'alert');
@@ -327,8 +343,8 @@ test('cron: el 2-nov entra; un cierre viejo, uno cancelado y uno ya aplicado no'
     },
   });
   db.cierreFilas.push({
-    match_id: ya, group_id: GRUPO, processed_at: AHORA, processed_by: null,
-    snapshot: {}, status: 'applied', note: null,
+    match_id: ya, group_id: GRUPO, processed_at: AHORA, processed_by: 'cron',
+    snapshot: [], status: 'applied', note: null,
   });
   d.ahora = () => new Date('2026-11-09T15:00:00.000Z');
   const r = await correrSancionesCierre(d, new Date('2026-11-09T15:00:00.000Z'));
@@ -354,6 +370,86 @@ test('cron: el 2-nov entra; un cierre viejo, uno cancelado y uno ya aplicado no'
   assert.equal(apagado.omitido, true);
 });
 
+test('L1: reclamo previo, processed_by y reintento sin duplicar', async () => {
+  const { d, db } = armar();
+  const r = await aplicarSancionesCierre(d, GRUPO, MATCH, actor);
+  assert.equal(r.status, 'applied');
+  assert.equal(db.cierreFilas[0].processed_by, `admin:${ADMIN}`);
+  assert.equal(db.inserts.length, 4);
+  assert.equal(db.deudas.length, 4);
+  const marcas = db.inserts.length + db.deudas.length;
+
+  await aplicarSancionesCierre(d, GRUPO, MATCH, { by: null, via: 'cron' });
+  assert.equal(db.inserts.length + db.deudas.length, marcas, 'un applied no vuelve a escribir');
+
+  const perdido = armar();
+  perdido.d.repo.reclamarCierre = async () => ({ creada: false });
+  const nada = await aplicarSancionesCierre(perdido.d, GRUPO, MATCH, actor);
+  assert.equal(nada.ya_aplicado, true);
+  assert.equal(perdido.db.inserts.length, 0);
+  assert.equal(perdido.db.deudas.length, 0);
+
+  const roto = armar();
+  const original = roto.d.repo.insertarSancion.bind(roto.d.repo);
+  let intentos = 0;
+  roto.d.repo.insertarSancion = async (s) => {
+    intentos += 1;
+    if (intentos === 1) throw Object.assign(new Error('corte'), { code: 'XX000' });
+    return original(s);
+  };
+  await assert.rejects(aplicarSancionesCierre(roto.d, GRUPO, MATCH, actor));
+  assert.notEqual(roto.db.cierreFilas[0].status, 'applied');
+  assert.equal(roto.db.inserts.length, 0);
+  const listo = await aplicarSancionesCierre(roto.d, GRUPO, MATCH, actor);
+  assert.equal(listo.status, 'applied');
+  assert.equal(roto.db.inserts.length, 4);
+  assert.equal(new Set(roto.db.inserts.map((s) => s.user_id)).size, 4);
+  assert.equal(roto.db.deudas.length, 4);
+});
+
+test('L3: no hay deudas ni sanciones de un cierre anterior al 2026-11-09', async () => {
+  assert.equal(instanteDesdeCierre(undefined).toISOString(), '2026-11-09T03:00:00.000Z');
+  assert.equal(instanteDesdeCierre('').toISOString(), '2026-11-09T03:00:00.000Z');
+  const { d, db } = armar({ desde: '2026-11-09' });
+  const directo = await aplicarSancionesCierre(d, GRUPO, MATCH, actor);
+  assert.equal(directo.omitido, true);
+  assert.equal(db.inserts.length, 0);
+  assert.equal(db.deudas.length, 0);
+  assert.equal(db.cierreFilas.length, 0);
+  const cron = await correrSancionesCierre(d, new Date('2026-11-10T15:00:00.000Z'));
+  assert.deepEqual(cron.resultados, []);
+  assert.equal(db.deudas.length, 0);
+
+  const tarde = '2026-11-09T15:00:00.000Z';
+  const sigue = armar({
+    desde: '2026-11-09',
+    cierres: { [MATCH]: tarde },
+  });
+  sigue.d.ahora = () => new Date('2026-11-10T15:00:00.000Z');
+  const si = await correrSancionesCierre(sigue.d, new Date('2026-11-10T15:00:00.000Z'));
+  assert.deepEqual(si.resultados.map((x) => x.match_id), [MATCH]);
+  assert.equal(sigue.db.inserts.length, 4);
+});
+
+test('L4: sin SANCION_HASTA_PAGAR solo queda la fecha', async () => {
+  const plan = planSancionesCierre({
+    cerrado: true, configurado: true, mpIncompleto: false, historialIncompleto: false,
+    cierreEn: CIERRE, fechaSancion: '2026-11-09', fechaPartido: '2026-11-02',
+    sancionHastaPagar: false,
+    titulares: TITULARES_2NOV.map((t): TitularAlCierre => ({ user_id: t.user_id!, nombre: t.nombre, estado: t.estado })),
+  });
+  assert.deepEqual(plan.sancionables.map((s) => s.nombre), ESPERADOS);
+  assert.ok(plan.sancionables.every((s) => s.deuda === false));
+
+  const { d, db } = armar({ hastaPagar: false });
+  const r = await aplicarSancionesCierre(d, GRUPO, MATCH, actor);
+  assert.equal(r.status, 'applied');
+  assert.equal(db.inserts.length, 4);
+  assert.equal(db.deudas.length, 0);
+  assert.ok(r.sancionados!.every((s) => s.deuda === false));
+  assert.ok((db.cierreFilas[0].snapshot as { deuda: boolean }[]).every((s) => s.deuda === false));
+});
+
 test('el repo de cierre no escribe en matches y el cron no loguea el secreto', () => {
   const repo = readFileSync(new URL('../../lib/mp/repo-supabase.ts', import.meta.url), 'utf8');
   assert.equal(/from\('matches'\)[^;]{0,120}\.(update|insert|delete)\(/.test(repo), false);
@@ -361,6 +457,9 @@ test('el repo de cierre no escribe en matches y el cron no loguea el secreto', (
   assert.equal(cron.includes('MP_ACCESS_TOKEN'), false);
   assert.equal(cron.includes('console.log'), false);
   assert.equal(cron.includes('CRON_SECRET'), true);
+  const vercel = readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8');
+  assert.match(vercel, /"schedule": "0 13 \* \* \*"/);
+  assert.equal(vercel.includes('*/10'), false);
   const panel = readFileSync(new URL('../../app/admin/Pagos.tsx', import.meta.url), 'utf8');
   assert.match(panel, /Aplicar sanciones del cierre/);
 });

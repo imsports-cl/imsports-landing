@@ -84,17 +84,29 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
     async saldarDeuda() { return { ok: true }; },
     async cierreSancion(matchId) {
       const fila = cierreFilas.find((f) => f.match_id === matchId);
-      return fila ? { ...fila, snapshot: { ...fila.snapshot } } : null;
+      return fila ? { ...fila, snapshot: fila.snapshot.map((x) => ({ ...x })) } : null;
     },
-    async guardarCierreSancion(fila) {
+    async reclamarCierre(p) {
+      const i = cierreFilas.findIndex((f) => f.match_id === p.match_id);
+      if (i >= 0) return { creada: false };
+      escrituras.push('cierre_sanciones');
+      cierreFilas.push({
+        match_id: p.match_id, group_id: p.group_id, processed_at: new Date().toISOString(),
+        processed_by: p.processed_by, snapshot: p.snapshot.map((x) => ({ ...x })), status: p.status, note: p.note,
+      });
+      return { creada: true };
+    },
+    async guardarCierreSancion(fila, opts) {
       escrituras.push('cierre_sanciones');
       const processed_at = fila.processed_at || new Date().toISOString();
       const i = cierreFilas.findIndex((f) => f.match_id === fila.match_id);
-      if (i >= 0 && cierreFilas[i].status === 'applied') return { ...cierreFilas[i], snapshot: { ...cierreFilas[i].snapshot } };
-      const row: CierreSancionFila = { ...fila, processed_at, snapshot: fila.snapshot };
+      if (i >= 0 && cierreFilas[i].status === 'applied' && fila.status !== 'applied' && !opts?.forzar) {
+        return { ...cierreFilas[i], snapshot: cierreFilas[i].snapshot.map((x) => ({ ...x })) };
+      }
+      const row: CierreSancionFila = { ...fila, processed_at, snapshot: fila.snapshot.map((x) => ({ ...x })) };
       if (i >= 0) cierreFilas[i] = row;
       else cierreFilas.push(row);
-      return { ...row, snapshot: { ...row.snapshot } };
+      return { ...row, snapshot: row.snapshot.map((x) => ({ ...x })) };
     },
     async partidosPendientesCierre(groupId, desdeIso, limite) {
       const desde = Date.parse(desdeIso);

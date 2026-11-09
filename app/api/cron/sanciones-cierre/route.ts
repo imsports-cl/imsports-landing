@@ -1,5 +1,5 @@
 /**
- * Cron de Vercel: cada 10 min (vercel.json).
+ * Cron de Vercel: una vez al día, 13:00 UTC (10:00 hora de Chile). Hobby no admite cada 10 min.
  * Authorization: Bearer CRON_SECRET. Con SANCIONES_AL_CIERRE apagado no escribe.
  * Mercado Pago solo lectura. No toca matches. No loguea el secreto ni correos.
  */

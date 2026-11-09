@@ -139,7 +139,9 @@ export async function POST(req: NextRequest) {
         if (body.confirmar !== true) throw new ErrorPagos('falta confirmación explícita');
         const matchId = String(body.match_id || '');
         exigirMatchId(matchId);
-        const r = await aplicarSancionesCierre(d, GRUPO_ID, matchId, { by: adminId, via: 'panel' });
+        const r = await aplicarSancionesCierre(d, GRUPO_ID, matchId, {
+          by: adminId ? `admin:${adminId}` : null, via: 'panel',
+        });
         return NextResponse.json({
           ...r,
           sancionados: (r.sancionados || []).map((s) => ({

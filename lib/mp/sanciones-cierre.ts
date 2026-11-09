@@ -7,14 +7,16 @@
  *
  * Apagado por defecto: SANCIONES_AL_CIERRE ausente o distinto de 1/true.
  */
-import { debeRegistrarDeuda } from './deudas';
-import { DIAS_VENTANA } from './tiempo';
+import { debeRegistrarDeuda, sancionHastaPagarActiva } from './deudas';
+import { DIAS_VENTANA, santiagoAUtc } from './tiempo';
 import {
   ErrorPagos,
   estadoPagos,
+  fechaSancion,
   inicioPartido,
   type CierreSancionFila,
   type CierreSancionSnapshot,
+  type CierreSnapshotItem,
   type Deps,
   type EstadoCierreSancion,
 } from './servicio';
@@ -27,11 +29,16 @@ export const SANCION_DEUDA_GRUPOS = [GRUPO_GALLETAS] as const;
 /** Quien organiza no paga la cancha. La misma lista que el panel. */
 export const NO_PAGAN_CANCHA = ['bmadain@gmail.com'];
 
-/** El cron no recorre años de cierres: solo mensajes match_closed de esta ventana. */
-export const DIAS_BUSQUEDA_CIERRE = 60;
+/**
+ * Sin SANCIONES_AL_CIERRE_DESDE no hay backfill: solo cierres desde el
+ * inicio de este día en Chile (el día del deploy de esta regla).
+ */
+export const SANCIONES_AL_CIERRE_DESDE_DEFECTO = '2026-11-09';
 
 /** Tope por pasada, para no encadenar búsquedas de Mercado Pago en un solo tick. */
 export const TOPE_POR_CRON = 3;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MS_DIA = 86400000;
 
@@ -43,6 +50,33 @@ export function sancionesAlCierreActivas(env?: { SANCIONES_AL_CIERRE?: string })
 export function grupoConSancionDeuda(groupId: string): boolean {
   const id = (groupId || '').toLowerCase();
   return SANCION_DEUDA_GRUPOS.some((g) => g === id);
+}
+
+/** Inicio del día en Chile, o un ISO con hora. Vacío → 2026-11-09 00:00 CLT. */
+export function instanteDesdeCierre(valor: string | undefined): Date {
+  const raw = (valor || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return santiagoAUtc(raw, '00:00');
+  if (raw && !Number.isNaN(Date.parse(raw))) return new Date(raw);
+  return santiagoAUtc(SANCIONES_AL_CIERRE_DESDE_DEFECTO, '00:00');
+}
+
+function desdeDe(deps: Deps): Date {
+  if (deps.sancionesAlCierreDesde !== undefined) return instanteDesdeCierre(deps.sancionesAlCierreDesde);
+  return instanteDesdeCierre(process.env.SANCIONES_AL_CIERRE_DESDE);
+}
+
+/** CHECK de la 043: 'cron' o 'admin:<uuid>'. */
+export function procesadoPor(actor: ActorCierre): string {
+  if (actor.via === 'cron') return 'cron';
+  const id = (actor.by || '').replace(/^admin:/, '').trim().toLowerCase();
+  if (!UUID.test(id)) throw new ErrorPagos('falta el admin', 403);
+  return `admin:${id}`;
+}
+
+function createdByDe(actor: ActorCierre): string | null {
+  if (actor.via === 'cron') return null;
+  const id = (actor.by || '').replace(/^admin:/, '').trim().toLowerCase();
+  return UUID.test(id) ? id : null;
 }
 
 /**
@@ -73,6 +107,7 @@ export interface PlanCierre {
   fechaPartido: string;
   cierreEn: string | null;
   sancionables: { user_id: string; nombre: string; estado: 'no_pagado' | 'pagado_tarde'; deuda: boolean }[];
+  /** Arreglo que persiste la 043. Un objeto no pasa el CHECK. */
   snapshot: CierreSancionSnapshot;
 }
 
@@ -98,6 +133,19 @@ function sinCorreos<T>(value: T): T {
  * No toca la base. no_pagado y pagado_tarde sancionan la fecha siguiente;
  * la deuda solo entra si no pagó.
  */
+function filaSnapshot(
+  t: TitularAlCierre,
+  sancion: { deuda: boolean } | undefined,
+): CierreSnapshotItem {
+  return {
+    user_id: t.user_id,
+    nombre: t.nombre,
+    estado: t.estado,
+    sancion: Boolean(sancion),
+    deuda: Boolean(sancion?.deuda),
+  };
+}
+
 export function planSancionesCierre(input: {
   cerrado: boolean;
   configurado: boolean;
@@ -106,23 +154,22 @@ export function planSancionesCierre(input: {
   cierreEn: string | null;
   fechaSancion: string;
   fechaPartido: string;
+  /** Sin SANCION_HASTA_PAGAR la deuda no entra: solo la fecha. */
+  sancionHastaPagar?: boolean;
   titulares: TitularAlCierre[];
 }): PlanCierre {
   const fechaSancion = input.fechaSancion;
   const fechaPartido = input.fechaPartido;
+  const hastaPagar = input.sancionHastaPagar === true;
   const titulares = input.titulares.map((t) => ({ ...t, nombre: nombreVisible(t.nombre), user_id: t.user_id }));
-  const base: CierreSancionSnapshot = {
-    cierre_en: input.cierreEn,
-    fecha_sancion: fechaSancion,
-    fecha_partido: fechaPartido,
-    mp_incompleto: input.mpIncompleto,
-    historial_incompleto: input.historialIncompleto,
-    configurado: input.configurado,
-    solapes: titulares.filter((t) => t.solape).map((t) => ({ user_id: t.user_id, nombre: t.nombre })),
-    al_dia: titulares.filter((t) => t.estado === 'pagado' && !t.solape).map((t) => ({ user_id: t.user_id, nombre: t.nombre })),
-  };
   const vacio = (status: PlanCierre['status'], note: string | null): PlanCierre => ({
-    status, note, fechaSancion, fechaPartido, cierreEn: input.cierreEn, sancionables: [], snapshot: sinCorreos(base),
+    status,
+    note,
+    fechaSancion,
+    fechaPartido,
+    cierreEn: input.cierreEn,
+    sancionables: [],
+    snapshot: sinCorreos(titulares.map((t) => filaSnapshot(t, undefined))),
   });
 
   if (!input.cerrado) return vacio('sin_cierre', null);
@@ -134,7 +181,7 @@ export function planSancionesCierre(input: {
     return vacio('skipped_incomplete', textoSeguro(`No se aplicaron sanciones: ${partes.join('. ')}.`));
   }
   if (titulares.some((t) => t.solape)) {
-    const quienes = base.solapes!.map((t) => t.nombre).join(', ');
+    const quienes = titulares.filter((t) => t.solape).map((t) => t.nombre).join(', ');
     return vacio('alert', textoSeguro(
       `No se aplicaron sanciones: hay un pago en el solape de ventanas (${quienes}). Revísalo antes de sancionar.`,
     ));
@@ -146,9 +193,10 @@ export function planSancionesCierre(input: {
       user_id: t.user_id,
       nombre: t.nombre,
       estado: t.estado as 'no_pagado' | 'pagado_tarde',
-      deuda: debeRegistrarDeuda({ activa: true, estado: t.estado, partidoEmpezo: true }),
+      deuda: debeRegistrarDeuda({ activa: hastaPagar, estado: t.estado, partidoEmpezo: true }),
     }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es') || a.user_id.localeCompare(b.user_id));
+  const porId = new Map(sancionables.map((s) => [s.user_id, s]));
 
   const note = sancionables.length
     ? `Sanciones no_pago para el ${fechaSancion}: ${sancionables.map((s) => s.nombre).join(', ')}.`
@@ -160,7 +208,7 @@ export function planSancionesCierre(input: {
     fechaPartido,
     cierreEn: input.cierreEn,
     sancionables,
-    snapshot: sinCorreos({ ...base, sancionados: sancionables.map((s) => ({ ...s, ya_existia: false })) }),
+    snapshot: sinCorreos(titulares.map((t) => filaSnapshot(t, porId.get(t.user_id)))),
   };
 }
 
@@ -187,10 +235,20 @@ function codesMigracion(e: { code?: string } | null | undefined): boolean {
   return e?.code === 'PGRST202' || e?.code === '42883' || e?.code === '42P01' || e?.code === 'PGRST205';
 }
 
+function sancionadosDe(items: CierreSancionSnapshot | undefined): NonNullable<ResultadoCierreSancion['sancionados']> {
+  return (Array.isArray(items) ? items : []).filter((s) => s.sancion).map((s) => ({
+    user_id: s.user_id,
+    nombre: nombreVisible(s.nombre),
+    estado: s.estado === 'pagado_tarde' ? 'pagado_tarde' as const : 'no_pagado' as const,
+    deuda: Boolean(s.deuda),
+    ya_existia: false,
+  }));
+}
+
 /**
  * Aplica (o deja alerta) las sanciones de un partido ya cerrado.
- * Si la fila está `applied`, no vuelve a escribir. `skipped_incomplete` y
- * `alert` se pueden reintentar: el botón recalcula y, si ahora hay certeza, aplica.
+ * El cierre se reclama primero (RPC). Si creada es false, no se escribe
+ * sanción ni deuda. Si la escritura falla, la fila no queda `applied`.
  */
 export async function aplicarSancionesCierre(
   deps: Deps,
@@ -202,30 +260,26 @@ export async function aplicarSancionesCierre(
   if (!grupoConSancionDeuda(groupId)) return { ok: true, omitido: true };
 
   const previa = await deps.repo.cierreSancion(matchId);
-  if (previa && previa.group_id !== groupId) throw new ErrorPagos('partido no encontrado', 404);
+  if (previa && previa.group_id && previa.group_id !== groupId) throw new ErrorPagos('partido no encontrado', 404);
   if (previa?.status === 'applied') {
     return {
       ok: true,
       ya_aplicado: true,
       status: 'applied',
-      applies_to: previa.snapshot?.fecha_sancion,
+      applies_to: await fechaSancion(deps.repo, await partidoO404(deps, groupId, matchId)),
       note: previa.note,
-      sancionados: (previa.snapshot?.sancionados || []).map((s) => ({
-        user_id: s.user_id,
-        nombre: nombreVisible(s.nombre),
-        estado: s.estado === 'pagado_tarde' ? 'pagado_tarde' : 'no_pagado',
-        deuda: Boolean(s.deuda),
-        ya_existia: Boolean(s.ya_existia),
-      })),
+      sancionados: sancionadosDe(previa.snapshot),
     };
   }
 
-  const m = await deps.repo.partido(matchId);
-  if (!m || m.group_id !== groupId) throw new ErrorPagos('partido no encontrado', 404);
+  const m = await partidoO404(deps, groupId, matchId);
   if (m.status === 'cancelled') throw new ErrorPagos('el partido está cancelado', 409);
   if (inicioPartido(m).getTime() > deps.ahora().getTime()) throw new ErrorPagos('el partido todavía no se juega', 409);
   const cerradoEn = await deps.repo.eventoCierre(m);
   if (!cerradoEn) throw new ErrorPagos('el partido todavía no se cierra', 409);
+  if (Date.parse(cerradoEn) < desdeDe(deps).getTime()) {
+    return { ok: true, omitido: true, note: 'Este cierre es anterior al inicio de las sanciones automáticas.' };
+  }
 
   const estado = await estadoPagos(deps, groupId, matchId);
   const plan = planSancionesCierre({
@@ -236,44 +290,88 @@ export async function aplicarSancionesCierre(
     cierreEn: estado.partido.cierre.en,
     fechaSancion: estado.fecha_sancion,
     fechaPartido: estado.partido.fecha,
+    sancionHastaPagar: deps.sancionHastaPagar ?? sancionHastaPagarActiva(),
     titulares: estado.titulares.map((t) => ({
       user_id: t.user_id, nombre: t.nombre, estado: t.estado, solape: t.solape,
     })),
   });
   if (plan.status === 'sin_cierre') throw new ErrorPagos('el partido todavía no se cierra', 409);
 
+  const processed_by = procesadoPor(actor);
   const processed_at = deps.ahora().toISOString();
+  const snapshot = plan.snapshot;
+
+  if (!previa) {
+    const reclamo = await deps.repo.reclamarCierre({
+      match_id: matchId, group_id: groupId, processed_by, snapshot, status: plan.status, note: plan.note,
+    });
+    if (!reclamo.creada) {
+      const ahoraFila = await deps.repo.cierreSancion(matchId);
+      if (ahoraFila?.status === 'applied') {
+        return {
+          ok: true, ya_aplicado: true, status: 'applied', applies_to: plan.fechaSancion,
+          note: ahoraFila.note, sancionados: sancionadosDe(ahoraFila.snapshot),
+        };
+      }
+      return {
+        ok: true, ya_aplicado: true, status: ahoraFila?.status, note: ahoraFila?.note ?? null,
+        applies_to: plan.fechaSancion, sancionados: [],
+      };
+    }
+    if (plan.status !== 'applied') {
+      return { ok: true, status: plan.status, note: plan.note, applies_to: plan.fechaSancion, sancionados: [] };
+    }
+    try {
+      const sancionados = await escribirSanciones(deps, groupId, matchId, plan, actor);
+      const cerrado = await cerrarNota(deps, groupId, matchId, plan, processed_by, processed_at, sancionados, snapshot);
+      return { ok: true, ya_aplicado: false, status: 'applied', applies_to: plan.fechaSancion, note: cerrado.note, sancionados };
+    } catch (e) {
+      await deps.repo.guardarCierreSancion({
+        match_id: matchId, group_id: groupId, processed_at, processed_by,
+        status: 'alert', snapshot,
+        note: 'No se aplicaron sanciones: falló la escritura. Se puede reintentar.',
+      }, { forzar: true }).catch(() => undefined);
+      throw e;
+    }
+  }
+
   if (plan.status !== 'applied') {
     const fila = await deps.repo.guardarCierreSancion({
-      match_id: matchId,
-      group_id: groupId,
-      processed_at,
-      processed_by: actor.by,
-      status: plan.status,
-      note: plan.note,
-      snapshot: sinCorreos({ ...plan.snapshot, via: actor.via }),
+      match_id: matchId, group_id: groupId, processed_at, processed_by,
+      status: plan.status, note: plan.note, snapshot,
     });
     return { ok: true, status: fila.status, note: fila.note, applies_to: plan.fechaSancion, sancionados: [] };
   }
+  const sancionados = await escribirSanciones(deps, groupId, matchId, plan, actor);
+  const cerrado = await cerrarNota(deps, groupId, matchId, plan, processed_by, processed_at, sancionados, snapshot);
+  return { ok: true, ya_aplicado: false, status: 'applied', applies_to: plan.fechaSancion, note: cerrado.note, sancionados };
+}
 
+async function partidoO404(deps: Deps, groupId: string, matchId: string) {
+  const m = await deps.repo.partido(matchId);
+  if (!m || m.group_id !== groupId) throw new ErrorPagos('partido no encontrado', 404);
+  return m;
+}
+
+async function escribirSanciones(
+  deps: Deps,
+  groupId: string,
+  matchId: string,
+  plan: PlanCierre,
+  actor: ActorCierre,
+): Promise<NonNullable<ResultadoCierreSancion['sancionados']>> {
+  const created_by = createdByDe(actor);
   const sancionados: NonNullable<ResultadoCierreSancion['sancionados']> = [];
-  const conflictos: { user_id: string; nombre: string; reason: string }[] = [];
   for (const s of plan.sancionables) {
     const prev = (await deps.repo.sanciones(groupId, plan.fechaSancion)).find((x) => x.user_id === s.user_id);
-    if (prev && prev.reason !== 'no_pago') {
-      conflictos.push({ user_id: s.user_id, nombre: s.nombre, reason: prev.reason });
-      continue;
-    }
+    if (prev && prev.reason !== 'no_pago') continue;
     let ya = Boolean(prev);
     if (!prev) {
       try {
         await deps.repo.insertarSancion({
-          group_id: groupId,
-          user_id: s.user_id,
-          applies_to: plan.fechaSancion,
-          reason: 'no_pago',
+          group_id: groupId, user_id: s.user_id, applies_to: plan.fechaSancion, reason: 'no_pago',
           note: `No pagó la pichanga del ${plan.fechaPartido} (match ${matchId})`,
-          created_by: actor.by,
+          created_by,
         });
       } catch (e: any) {
         if (e?.code !== '23505') throw e;
@@ -283,7 +381,7 @@ export async function aplicarSancionesCierre(
     let deuda = false;
     if (s.deuda) {
       try {
-        const r = await deps.repo.registrarDeuda({ match_id: matchId, user_id: s.user_id, created_by: actor.by });
+        const r = await deps.repo.registrarDeuda({ match_id: matchId, user_id: s.user_id, created_by });
         deuda = Boolean(r?.ok && !r.omitida);
       } catch (e: any) {
         if (e?.code === '23505') deuda = true;
@@ -293,39 +391,39 @@ export async function aplicarSancionesCierre(
     }
     sancionados.push({ user_id: s.user_id, nombre: s.nombre, estado: s.estado, deuda, ya_existia: ya });
   }
+  return sancionados;
+}
 
+async function cerrarNota(
+  deps: Deps,
+  groupId: string,
+  matchId: string,
+  plan: PlanCierre,
+  processed_by: string,
+  processed_at: string,
+  sancionados: NonNullable<ResultadoCierreSancion['sancionados']>,
+  base: CierreSancionSnapshot,
+) {
   let note = plan.note || '';
-  if (conflictos.length) {
-    note = `${note} No se pisó otra sanción de ${conflictos.map((c) => `${c.nombre} (${c.reason})`).join(', ')}.`.trim();
+  const pisadas = plan.sancionables.filter((s) => !sancionados.some((x) => x.user_id === s.user_id));
+  if (pisadas.length) {
+    note = `${note} No se pisó otra sanción de ${pisadas.map((s) => s.nombre).join(', ')}.`.trim();
   }
-  const sinDeuda = sancionados.filter((s) => s.estado === 'no_pagado' && !s.deuda);
+  const sinDeuda = sancionados.filter((s) => s.estado === 'no_pagado' && !s.deuda && plan.sancionables.find((p) => p.user_id === s.user_id)?.deuda);
   if (sinDeuda.length) {
     note = `${note} No quedó registrada la deuda de ${sinDeuda.map((s) => s.nombre).join(', ')}.`.trim();
   }
   note = textoSeguro(note);
-  const snapshot = sinCorreos({
-    ...plan.snapshot,
-    via: actor.via,
-    sancionados,
-    conflictos,
+  const porUser = new Map(sancionados.map((s) => [s.user_id, s]));
+  const snapshot = sinCorreos(base.map((item) => {
+    const hecho = porUser.get(item.user_id);
+    if (!hecho) return item.sancion ? { ...item, sancion: false, deuda: false } : item;
+    return { ...item, sancion: true, deuda: hecho.deuda };
+  }));
+  return deps.repo.guardarCierreSancion({
+    match_id: matchId, group_id: groupId, processed_at, processed_by,
+    status: 'applied', note, snapshot,
   });
-  const fila = await deps.repo.guardarCierreSancion({
-    match_id: matchId,
-    group_id: groupId,
-    processed_at,
-    processed_by: actor.by,
-    status: 'applied',
-    note,
-    snapshot,
-  });
-  return {
-    ok: true,
-    ya_aplicado: false,
-    status: fila.status,
-    applies_to: plan.fechaSancion,
-    note: fila.note,
-    sancionados,
-  };
 }
 
 export interface ResultadoCron {
@@ -337,7 +435,7 @@ export interface ResultadoCron {
 /** Una pasada del cron. Con el flag apagado no lee ni escribe. */
 export async function correrSancionesCierre(deps: Deps, ahora = new Date()): Promise<ResultadoCron> {
   if (!flagActivo(deps)) return { ok: true, omitido: true, resultados: [] };
-  const desde = new Date(ahora.getTime() - DIAS_BUSQUEDA_CIERRE * MS_DIA).toISOString();
+  const desde = desdeDe(deps).toISOString();
   const resultados: ResultadoCron['resultados'] = [];
   for (const groupId of SANCION_DEUDA_GRUPOS) {
     let pendientes: { id: string; cerrado_en: string }[] = [];
@@ -379,7 +477,7 @@ export function vistaCierreSancion(fila: CierreSancionFila | null): {
   sancionados: { nombre: string; estado: 'no_pagado' | 'pagado_tarde'; deuda: boolean }[];
 } | null {
   if (!fila) return null;
-  const lista = Array.isArray(fila.snapshot?.sancionados) ? fila.snapshot.sancionados : [];
+  const lista = (Array.isArray(fila.snapshot) ? fila.snapshot : []).filter((s) => s?.sancion);
   return {
     status: fila.status,
     note: fila.note ? textoSeguro(fila.note) : null,

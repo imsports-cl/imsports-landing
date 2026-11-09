@@ -194,7 +194,7 @@ export default function Pagos({ token }: { token: string }) {
     const j = await post({ accion: 'aplicar_sanciones_cierre', match_id: d.partido.id, confirmar: true }, 'cierre');
     if (!j) return;
     if (j.omitido) {
-      alert('Las sanciones al cierre están apagadas.');
+      alert(j.note || 'Las sanciones al cierre están apagadas.');
       return;
     }
     if (j.ya_aplicado) {

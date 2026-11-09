@@ -19,20 +19,35 @@ function err(e: any) {
   throw x;
 }
 
+function snapshotCierre(raw: unknown): CierreSancionSnapshot {
+  const valor = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return []; } })() : raw;
+  if (!Array.isArray(valor)) return [];
+  return valor.filter((x) => x && typeof x === 'object').map((x) => ({
+    user_id: String(x.user_id || ''),
+    nombre: String(x.nombre || ''),
+    estado: x.estado === 'pagado' || x.estado === 'pagado_tarde' ? x.estado : 'no_pagado',
+    sancion: Boolean(x.sancion),
+    deuda: Boolean(x.deuda),
+  }));
+}
+
+function creadaDe(data: unknown): boolean {
+  if (data === true) return true;
+  if (data && typeof data === 'object' && !Array.isArray(data) && 'creada' in data) return Boolean((data as { creada?: boolean }).creada);
+  if (Array.isArray(data) && data[0] && typeof data[0] === 'object') return Boolean((data[0] as { creada?: boolean }).creada);
+  return false;
+}
+
 function filaCierre(raw: {
   match_id: string; group_id: string; processed_at: string; processed_by?: string | null;
-  snapshot?: CierreSancionSnapshot | string | null; status: CierreSancionFila['status']; note?: string | null;
+  snapshot?: unknown; status: CierreSancionFila['status']; note?: string | null;
 }): CierreSancionFila {
-  let snapshot: CierreSancionSnapshot = {};
-  if (typeof raw.snapshot === 'string') {
-    try { snapshot = JSON.parse(raw.snapshot) as CierreSancionSnapshot; } catch { snapshot = {}; }
-  } else if (raw.snapshot && typeof raw.snapshot === 'object') snapshot = raw.snapshot;
   return {
     match_id: raw.match_id,
     group_id: raw.group_id,
     processed_at: raw.processed_at,
-    processed_by: raw.processed_by ?? null,
-    snapshot,
+    processed_by: raw.processed_by || '',
+    snapshot: snapshotCierre(raw.snapshot),
     status: raw.status,
     note: raw.note ?? null,
   };
@@ -263,7 +278,21 @@ export const repoSupabase: PagosRepo = {
     if (!data) return null;
     return filaCierre(data);
   },
-  async guardarCierreSancion(fila) {
+  async reclamarCierre(p) {
+    const { data, error } = await db.rpc('registrar_cierre_sanciones', {
+      p_match_id: p.match_id,
+      p_processed_by: p.processed_by,
+      p_snapshot: p.snapshot,
+      p_status: p.status,
+      p_note: p.note,
+    });
+    if (error?.code === '42P01' || error?.code === 'PGRST205' || error?.code === 'PGRST202' || error?.code === '42883') {
+      throw new ErrorPagos('falta registrar_cierre_sanciones', 503);
+    }
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    return { creada: creadaDe(data) };
+  },
+  async guardarCierreSancion(fila, opts) {
     // Solo cierre_sanciones. matches no se toca.
     const processed_at = fila.processed_at || new Date().toISOString();
     const row = {
@@ -279,7 +308,7 @@ export const repoSupabase: PagosRepo = {
       .select('status').eq('match_id', fila.match_id).maybeSingle();
     if (e0?.code === '42P01' || e0?.code === 'PGRST205') throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
     err(e0);
-    if ((prev as { status?: string } | null)?.status === 'applied') {
+    if ((prev as { status?: string } | null)?.status === 'applied' && fila.status !== 'applied' && !opts?.forzar) {
       const vigente = await this.cierreSancion(fila.match_id);
       if (!vigente) throw new ErrorPagos('no se pudo leer cierre_sanciones', 503);
       return vigente;
@@ -294,14 +323,16 @@ export const repoSupabase: PagosRepo = {
         return filaCierre(row);
       }
     }
-    const { error } = await db.from('cierre_sanciones').update({
+    let update = db.from('cierre_sanciones').update({
       group_id: row.group_id,
       processed_at: row.processed_at,
       processed_by: row.processed_by,
       snapshot: row.snapshot,
       status: row.status,
       note: row.note,
-    }).eq('match_id', fila.match_id).neq('status', 'applied');
+    }).eq('match_id', fila.match_id);
+    if (!opts?.forzar && fila.status !== 'applied') update = update.neq('status', 'applied');
+    const { error } = await update;
     err(error);
     return (await this.cierreSancion(fila.match_id)) || filaCierre(row);
   },
