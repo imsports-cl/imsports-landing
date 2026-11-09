@@ -92,6 +92,7 @@ export const repoSupabase: PagosRepo = {
     let members: any[] = [];
     let desde = 0;
     let cortado = false;
+    let sinConteo = false;
     for (let pagina = 0; pagina < 30; pagina++) {
       const confirmaciones = db.from('match_confirmations')
         .select('match_id, user_id, user:users(display_name, email)', { count: 'exact' })
@@ -109,7 +110,10 @@ export const repoSupabase: PagosRepo = {
       err(confRes.error);
       if (memRes) err((memRes as { error: any }).error);
       if (pagina === 0) members = (memRes as { data: any[] | null }).data || [];
-      if (total == null && typeof confRes.count === 'number') total = confRes.count;
+      // count: 'exact' pedido. null no es «no había filas»: es que no sabemos cuántas hay.
+      if (typeof confRes.count === 'number') {
+        if (total == null) total = confRes.count;
+      } else sinConteo = true;
       const page = confRes.data || [];
       confs.push(...page);
       if (page.length < PAGINA) break;
@@ -120,7 +124,12 @@ export const repoSupabase: PagosRepo = {
     const nick = new Map((members || []).map((x: any) => [x.user_id, x.nickname as string | null]));
     const out: Record<string, { user_id: string; nombre: string; display_name: string | null; nickname: string | null; email: string | null }[]> = {};
     for (const id of ids) out[id] = [];
+    // Las páginas no son una foto: un alta/baja entre una y otra puede repetir una fila.
+    const vistos = new Set<string>();
     for (const c of confs) {
+      const clave = `${c.match_id}\0${c.user_id}`;
+      if (vistos.has(clave)) continue;
+      vistos.add(clave);
       const fila = {
         user_id: c.user_id,
         nombre: nick.get(c.user_id) || c.user?.display_name || 'Jugador',
@@ -130,7 +139,7 @@ export const repoSupabase: PagosRepo = {
       };
       (out[c.match_id] ||= []).push(fila);
     }
-    if (cortado || (total != null && confs.length !== total)) {
+    if (cortado || sinConteo || (total != null && confs.length !== total)) {
       (out as any)[TITULARES_INCOMPLETO] = true;
     }
     return out;
