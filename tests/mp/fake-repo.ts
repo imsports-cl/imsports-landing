@@ -1,6 +1,6 @@
 import type { AliasPagador, Titular } from '../../lib/mp/cruce';
-import { validarSnapshotCierre043 } from '../../lib/mp/cierre-043';
-import { inicioPartido, type CierreSancionFila, type Partido, type PagosRepo, type Sancion } from '../../lib/mp/servicio';
+import { MINUTOS_LEASE_044, validarSnapshotCierre043 } from '../../lib/mp/cierre-043';
+import { inicioPartido, type ActualizacionCierre, type CierreSancionFila, type Partido, type PagosRepo, type ReclamoCierre, type Sancion } from '../../lib/mp/servicio';
 
 /** BD en memoria. Reproduce el UNIQUE (group_id, user_id, applies_to) de player_sanctions. */
 export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, Titular[]>; miembros?: { user_id: string; nombre: string }[]; sanciones?: (Sancion & { group_id: string })[]; aliases?: (AliasPagador & { id: string; payer_label: string | null; group_id: string })[]; cierres?: Record<string, string>; convocatorias?: Record<string, string | null>; cierreSanciones?: CierreSancionFila[] }) {
@@ -93,38 +93,55 @@ export function fakeRepo(init: { partidos: Partido[]; titulares: Record<string, 
       const fila = cierreFilas.find((f) => f.match_id === matchId);
       return fila ? { ...fila, snapshot: fila.snapshot.map((x) => ({ ...x })) } : null;
     },
-    async reclamarCierre(p) {
+    async reclamarCierre(p): Promise<ReclamoCierre> {
       validarSnapshotCierre043(p.status, p.snapshot);
+      const ahora = new Date().toISOString();
       const i = cierreFilas.findIndex((f) => f.match_id === p.match_id);
-      if (i >= 0) return { creada: false };
-      escrituras.push('cierre_sanciones');
-      cierreFilas.push({
-        match_id: p.match_id, group_id: p.group_id, processed_at: new Date().toISOString(),
-        processed_by: p.processed_by, snapshot: p.snapshot.map((x) => ({ ...x })), status: p.status, note: p.note,
-      });
-      return { creada: true };
-    },
-    async guardarCierreSancion(fila, opts) {
-      validarSnapshotCierre043(fila.status, fila.snapshot);
-      escrituras.push('cierre_sanciones');
-      const processed_at = fila.processed_at || new Date().toISOString();
-      const i = cierreFilas.findIndex((f) => f.match_id === fila.match_id);
-      if (i >= 0 && cierreFilas[i].status === 'applied' && fila.status !== 'applied' && !opts?.forzar) {
-        return { ...cierreFilas[i], snapshot: cierreFilas[i].snapshot.map((x) => ({ ...x })) };
+      if (i < 0) {
+        escrituras.push('cierre_sanciones');
+        cierreFilas.push({
+          match_id: p.match_id, group_id: p.group_id, processed_at: ahora,
+          processed_by: p.processed_by, snapshot: p.snapshot.map((x) => ({ ...x })), status: 'processing', note: p.note,
+        });
+        return { creada: true, status: 'processing', motivo: 'creada', processed_at: ahora };
       }
-      const row: CierreSancionFila = { ...fila, processed_at, snapshot: fila.snapshot.map((x) => ({ ...x })) };
-      if (i >= 0) cierreFilas[i] = row;
-      else cierreFilas.push(row);
-      return { ...row, snapshot: row.snapshot.map((x) => ({ ...x })) };
+      const fila = cierreFilas[i];
+      if (fila.status === 'applied') {
+        return { creada: false, status: 'applied', motivo: 'applied', processed_at: fila.processed_at };
+      }
+      const edad = Date.now() - Date.parse(fila.processed_at);
+      if (fila.status === 'processing' && edad < MINUTOS_LEASE_044 * 60 * 1000) {
+        return { creada: false, status: 'processing', motivo: 'en_curso', processed_at: fila.processed_at };
+      }
+      escrituras.push('cierre_sanciones');
+      fila.processed_at = ahora;
+      fila.processed_by = p.processed_by;
+      fila.snapshot = p.snapshot.map((x) => ({ ...x }));
+      fila.status = 'processing';
+      fila.note = p.note;
+      return { creada: true, status: 'processing', motivo: 'retomada', processed_at: ahora };
     },
-    async partidosPendientesCierre(groupId, desdeIso, limite, reintentoAntesIso) {
+    async guardarCierreSancion(fila, opts): Promise<ActualizacionCierre> {
+      validarSnapshotCierre043(fila.status, fila.snapshot);
+      const i = cierreFilas.findIndex((f) => f.match_id === fila.match_id);
+      if (i < 0) return { motivo: 'lease', fila: null };
+      const vigente = cierreFilas[i];
+      if (vigente.status === 'applied') {
+        return { motivo: 'applied', fila: { ...vigente, snapshot: vigente.snapshot.map((x) => ({ ...x })) } };
+      }
+      if (!opts?.claimedAt || opts.claimedAt !== vigente.processed_at) {
+        return { motivo: 'lease', fila: { ...vigente, snapshot: vigente.snapshot.map((x) => ({ ...x })) } };
+      }
+      escrituras.push('cierre_sanciones');
+      vigente.status = fila.status;
+      vigente.processed_by = fila.processed_by;
+      vigente.note = fila.note;
+      vigente.snapshot = fila.snapshot.map((x) => ({ ...x }));
+      return { motivo: 'actualizada', fila: { ...vigente, snapshot: vigente.snapshot.map((x) => ({ ...x })) } };
+    },
+    async partidosPendientesCierre(groupId, desdeIso, limite) {
       const desde = Date.parse(desdeIso);
-      const corte = reintentoAntesIso ? Date.parse(reintentoAntesIso) : 0;
-      const excluir = new Set(cierreFilas.filter((f) => {
-        if (f.status === 'applied') return true;
-        if (f.status === 'processing' && Date.parse(f.processed_at) >= corte) return true;
-        return false;
-      }).map((f) => f.match_id));
+      const excluir = new Set(cierreFilas.filter((f) => f.status === 'applied').map((f) => f.match_id));
       return init.partidos
         .filter((p) => p.group_id === groupId && p.status !== 'cancelled' && init.cierres?.[p.id] && !excluir.has(p.id))
         .map((p) => ({ id: p.id, cerrado_en: init.cierres![p.id] }))

@@ -92,8 +92,8 @@ export interface PagosRepo {
   /** Fila de cierre_sanciones, o null si ese partido todavía no se procesó. */
   cierreSancion(matchId: string): Promise<CierreSancionFila | null>;
   /**
-   * Reclamo atómico vía RPC registrar_cierre_sanciones (043).
-   * creada false: la fila ya existía; el llamador no debe escribir sanciones ni deudas.
+   * RPC registrar_cierre_sanciones (044). jsonb: creada, status, motivo, processed_at.
+   * motivo: creada | retomada | en_curso | applied.
    */
   reclamarCierre(p: {
     match_id: string;
@@ -102,25 +102,35 @@ export interface PagosRepo {
     snapshot: CierreSancionSnapshot;
     status: EstadoCierreSancion;
     note: string | null;
-  }): Promise<{ creada: boolean }>;
+  }): Promise<ReclamoCierre>;
   /**
-   * Actualiza cierre_sanciones. Si ya está `applied`, no la baja
-   * salvo opts.forzar (un fallo de escritura no puede dejarla applied).
+   * RPC actualizar_cierre_sanciones (044). El lease es p_claimed_at.
+   * motivo applied: la fila ya es inmutable. motivo lease: otro proceso la retomó.
    * No escribe en matches.
    */
   guardarCierreSancion(
     fila: Omit<CierreSancionFila, 'processed_at'> & { processed_at?: string },
-    opts?: { forzar?: boolean },
-  ): Promise<CierreSancionFila>;
+    opts: { claimedAt: string },
+  ): Promise<ActualizacionCierre>;
   /**
-   * Partidos con mensaje match_closed, sin fila en cierre_sanciones,
-   * no cancelados, cuyo cierre es >= desdeIso. Más recientes primero.
+   * Cierres >= desdeIso que no están applied (incluye processing, alert y
+   * skipped_incomplete). El RPC decide si el processing se puede retomar.
    */
-  /**
-   * Cierres >= desdeIso sin fila applied. Reintenta alert, skipped_incomplete
-   * y processing con processed_at anterior a reintentoAntesIso.
-   */
-  partidosPendientesCierre(groupId: string, desdeIso: string, limite: number, reintentoAntesIso?: string): Promise<{ id: string; cerrado_en: string }[]>;
+  partidosPendientesCierre(groupId: string, desdeIso: string, limite: number): Promise<{ id: string; cerrado_en: string }[]>;
+}
+
+/** Respuesta jsonb de registrar_cierre_sanciones (044 @ 5edcf93). */
+export interface ReclamoCierre {
+  creada: boolean;
+  status: EstadoCierreSancion | null;
+  motivo: 'creada' | 'retomada' | 'en_curso' | 'applied' | null;
+  processed_at: string | null;
+}
+
+/** Respuesta de actualizar_cierre_sanciones. */
+export interface ActualizacionCierre {
+  motivo: 'actualizada' | 'applied' | 'lease';
+  fila: CierreSancionFila | null;
 }
 
 export interface MpLector {

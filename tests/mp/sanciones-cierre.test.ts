@@ -385,9 +385,12 @@ test('L1: reclamo previo, processed_by y reintento sin duplicar', async () => {
   assert.equal(db.inserts.length + db.deudas.length, marcas, 'un applied no vuelve a escribir');
 
   const perdido = armar();
-  perdido.d.repo.reclamarCierre = async () => ({ creada: false });
+  perdido.d.repo.reclamarCierre = async () => ({
+    creada: false, status: 'processing', motivo: 'en_curso', processed_at: new Date().toISOString(),
+  });
   const nada = await aplicarSancionesCierre(perdido.d, GRUPO, MATCH, actor);
-  assert.equal(nada.ya_aplicado, true);
+  assert.equal(nada.status, 'processing');
+  assert.notEqual(nada.ya_aplicado, true);
   assert.equal(perdido.db.inserts.length, 0);
   assert.equal(perdido.db.deudas.length, 0);
 
@@ -483,23 +486,27 @@ test('reintento: processing no queda applied a medias y no duplica', async () =>
   assert.equal(db.deudas.length, 4);
 });
 
-test('cron retoma processing viejo y alert; deja el processing fresco', async () => {
+test('044: processing fresco no escribe; el viejo y un alert se retoman', async () => {
   const ahora = new Date('2026-11-09T15:00:00.000Z');
   const fresco = armar();
   fresco.d.ahora = () => ahora;
   fresco.db.cierreFilas.push({
     match_id: MATCH, group_id: GRUPO, processed_by: 'cron', status: 'processing', note: 'Cierre en curso.',
-    processed_at: ahora.toISOString(), snapshot: [],
+    processed_at: new Date().toISOString(), snapshot: [],
   });
   const quieto = await correrSancionesCierre(fresco.d, ahora);
-  assert.deepEqual(quieto.resultados, []);
+  assert.equal(quieto.resultados[0]?.status, 'processing');
   assert.equal(fresco.db.inserts.length, 0);
+  const boton = await aplicarSancionesCierre(fresco.d, GRUPO, MATCH, actor);
+  assert.equal(boton.status, 'processing');
+  assert.equal(fresco.db.inserts.length, 0);
+  assert.equal(fresco.db.cierreFilas[0].status, 'processing');
 
   const viejo = armar();
   viejo.d.ahora = () => ahora;
   viejo.db.cierreFilas.push({
     match_id: MATCH, group_id: GRUPO, processed_by: 'cron', status: 'processing', note: 'Cierre en curso.',
-    processed_at: new Date(ahora.getTime() - 11 * 60 * 1000).toISOString(), snapshot: [],
+    processed_at: new Date(Date.now() - 11 * 60 * 1000).toISOString(), snapshot: [],
   });
   const seguido = await correrSancionesCierre(viejo.d, ahora);
   assert.equal(seguido.resultados[0]?.status, 'applied');
@@ -510,11 +517,35 @@ test('cron retoma processing viejo y alert; deja el processing fresco', async ()
   alerta.db.cierreFilas.push({
     match_id: MATCH, group_id: GRUPO, processed_by: `admin:${ADMIN}`, status: 'alert',
     note: 'Escritura incompleta: quedaron 0 sanciones y 0 deudas. Se puede reintentar.',
-    processed_at: ahora.toISOString(), snapshot: [],
+    processed_at: new Date(Date.now() - 60 * 1000).toISOString(), snapshot: [],
   });
   const button = await aplicarSancionesCierre(alerta.d, GRUPO, MATCH, actor);
   assert.equal(button.status, 'applied');
   assert.equal(alerta.db.inserts.length, 4);
+});
+
+test('044: perder el lease no marca applied; dos procesos no duplican', async () => {
+  const { d, db } = armar();
+  const original = d.repo.guardarCierreSancion.bind(d.repo);
+  d.repo.guardarCierreSancion = async (fila, opts) => {
+    const row = db.cierreFilas.find((f) => f.match_id === fila.match_id);
+    if (row) row.processed_at = new Date(Date.now() + 1000).toISOString();
+    return original(fila, opts);
+  };
+  const perdido = await aplicarSancionesCierre(d, GRUPO, MATCH, actor);
+  assert.equal(perdido.status, 'processing');
+  assert.notEqual(db.cierreFilas[0].status, 'applied');
+
+  const par = armar();
+  const [a, b] = await Promise.all([
+    aplicarSancionesCierre(par.d, GRUPO, MATCH, actor),
+    aplicarSancionesCierre(par.d, GRUPO, MATCH, { by: null, via: 'cron' }),
+  ]);
+  const aplicados = [a, b].filter((r) => r.status === 'applied');
+  assert.equal(aplicados.length, 1);
+  assert.equal(par.db.inserts.length, 4);
+  assert.equal(par.db.deudas.length, 4);
+  assert.equal(par.db.cierreFilas.filter((f) => f.status === 'applied').length, 1);
 });
 
 test('L4: sin SANCION_HASTA_PAGAR solo queda la fecha', async () => {

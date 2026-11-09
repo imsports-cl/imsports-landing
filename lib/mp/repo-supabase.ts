@@ -7,7 +7,7 @@ import { validarSnapshotCierre043 } from './cierre-043';
 import { exigirMatchId } from './ids';
 import {
   inicioPartido, ErrorPagos, TITULARES_INCOMPLETO,
-  type CierreSancionFila, type CierreSancionSnapshot, type PagosRepo, type Partido,
+  type ActualizacionCierre, type CierreSancionFila, type CierreSancionSnapshot, type PagosRepo, type Partido, type ReclamoCierre,
 } from './servicio';
 
 const PARTIDO = 'id, group_id, date, time, price, status, phase, created_at';
@@ -33,11 +33,21 @@ function snapshotCierre(raw: unknown): CierreSancionSnapshot {
   }));
 }
 
-function creadaDe(data: unknown): boolean {
-  if (data === true) return true;
-  if (data && typeof data === 'object' && !Array.isArray(data) && 'creada' in data) return Boolean((data as { creada?: boolean }).creada);
-  if (Array.isArray(data) && data[0] && typeof data[0] === 'object') return Boolean((data[0] as { creada?: boolean }).creada);
-  return false;
+function jsonbRpc(data: unknown): Record<string, unknown> {
+  if (Array.isArray(data)) return (data[0] && typeof data[0] === 'object' ? data[0] : {}) as Record<string, unknown>;
+  if (data && typeof data === 'object') return data as Record<string, unknown>;
+  return {};
+}
+
+function reclamoDe(data: unknown): ReclamoCierre {
+  const j = jsonbRpc(data);
+  const motivo = j.motivo;
+  return {
+    creada: j.creada === true,
+    status: (j.status as ReclamoCierre['status']) ?? null,
+    motivo: motivo === 'creada' || motivo === 'retomada' || motivo === 'en_curso' || motivo === 'applied' ? motivo : null,
+    processed_at: typeof j.processed_at === 'string' ? j.processed_at : null,
+  };
 }
 
 function filaCierre(raw: {
@@ -292,56 +302,31 @@ export const repoSupabase: PagosRepo = {
     if (error?.code === '42P01' || error?.code === 'PGRST205' || error?.code === 'PGRST202' || error?.code === '42883') {
       throw new ErrorPagos('falta registrar_cierre_sanciones', 503);
     }
-    if (error?.code === '23514') throw new ErrorPagos('falta permitir status processing (migración 044)', 503);
     if (error) throw Object.assign(new Error(error.message), { code: error.code });
-    return { creada: creadaDe(data) };
+    return reclamoDe(data);
   },
-  async guardarCierreSancion(fila, opts) {
+  async guardarCierreSancion(fila, opts): Promise<ActualizacionCierre> {
     validarSnapshotCierre043(fila.status, fila.snapshot);
-    // Solo cierre_sanciones. matches no se toca.
-    const processed_at = fila.processed_at || new Date().toISOString();
-    const row = {
-      match_id: fila.match_id,
-      group_id: fila.group_id,
-      processed_at,
-      processed_by: fila.processed_by,
-      snapshot: fila.snapshot,
-      status: fila.status,
-      note: fila.note,
-    };
-    const { data: prev, error: e0 } = await db.from('cierre_sanciones')
-      .select('status').eq('match_id', fila.match_id).maybeSingle();
-    if (e0?.code === '42P01' || e0?.code === 'PGRST205') throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
-    err(e0);
-    if ((prev as { status?: string } | null)?.status === 'applied' && fila.status !== 'applied' && !opts?.forzar) {
-      const vigente = await this.cierreSancion(fila.match_id);
-      if (!vigente) throw new ErrorPagos('no se pudo leer cierre_sanciones', 503);
-      return vigente;
+    // Solo el RPC. No hay UPDATE directo y matches no se toca.
+    const { data, error } = await db.rpc('actualizar_cierre_sanciones', {
+      p_match_id: fila.match_id,
+      p_processed_by: fila.processed_by,
+      p_snapshot: fila.snapshot,
+      p_status: fila.status,
+      p_note: fila.note,
+      p_claimed_at: opts.claimedAt,
+    });
+    if (error?.code === '42P01' || error?.code === 'PGRST205' || error?.code === 'PGRST202' || error?.code === '42883') {
+      throw new ErrorPagos('falta actualizar_cierre_sanciones', 503);
     }
-    if (!prev) {
-      const { error } = await db.from('cierre_sanciones').insert(row);
-      if (error?.code === '23505') {
-        const vigente = await this.cierreSancion(fila.match_id);
-        if (vigente?.status === 'applied') return vigente;
-      } else {
-        err(error);
-        return filaCierre(row);
-      }
-    }
-    let update = db.from('cierre_sanciones').update({
-      group_id: row.group_id,
-      processed_at: row.processed_at,
-      processed_by: row.processed_by,
-      snapshot: row.snapshot,
-      status: row.status,
-      note: row.note,
-    }).eq('match_id', fila.match_id);
-    if (!opts?.forzar && fila.status !== 'applied') update = update.neq('status', 'applied');
-    const { error } = await update;
-    err(error);
-    return (await this.cierreSancion(fila.match_id)) || filaCierre(row);
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    const motivo = jsonbRpc(data).motivo;
+    const vigente = await this.cierreSancion(fila.match_id);
+    if (motivo === 'applied') return { motivo: 'applied', fila: vigente };
+    if (motivo === 'lease') return { motivo: 'lease', fila: vigente };
+    return { motivo: 'actualizada', fila: vigente };
   },
-  async partidosPendientesCierre(groupId, desdeIso, limite, reintentoAntesIso) {
+  async partidosPendientesCierre(groupId, desdeIso, limite) {
     const { data, error } = await db.from('group_messages')
       .select('created_at, metadata')
       .eq('group_id', groupId).eq('type', 'system')
@@ -364,11 +349,9 @@ export const repoSupabase: PagosRepo = {
       .select('match_id, status, processed_at').in('match_id', ids);
     if (e2?.code === '42P01' || e2?.code === 'PGRST205') throw new ErrorPagos('falta la tabla cierre_sanciones', 503);
     err(e2);
-    const corte = reintentoAntesIso ? Date.parse(reintentoAntesIso) : 0;
     const excluir = new Set<string>();
-    for (const r of (hechos || []) as { match_id: string; status?: string; processed_at?: string }[]) {
+    for (const r of (hechos || []) as { match_id: string; status?: string }[]) {
       if (r.status === 'applied') excluir.add(r.match_id);
-      else if (r.status === 'processing' && Date.parse(r.processed_at || '') >= corte) excluir.add(r.match_id);
     }
     const candidatos = ids.filter((id) => !excluir.has(id));
     if (!candidatos.length) return [];

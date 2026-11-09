@@ -7,16 +7,15 @@
  *   RAISE EXCEPTION 'cada titular necesita user_id y pagado' USING ERRCODE = 'P0001'.
  * Otros status no entran a ese loop.
  *
- * El CHECK de status de la 043 es applied | skipped_incomplete | alert.
- * 'processing' no pasa ese CHECK. Hace falta una 044, sin aplicar acá:
- *
- *   ALTER TABLE public.cierre_sanciones DROP CONSTRAINT IF EXISTS cierre_sanciones_status_check;
- *   ALTER TABLE public.cierre_sanciones ADD CONSTRAINT cierre_sanciones_status_check
- *     CHECK (status IN ('processing', 'applied', 'skipped_incomplete', 'alert'));
- *
- *   Y en registrar_cierre_sanciones, aceptar p_status = 'processing'
- *   sin entrar al loop de pagado (ese loop sigue solo para 'applied').
+ * El CHECK de la 043 se llama ck_cierre_sanciones_status.
+ * La 044 (imsports-app PR #24, SHA 5edcf93, rama cursor/cierre-sanciones-processing-0790)
+ * lo amplía a processing | applied | skipped_incomplete | alert.
+ * registrar_cierre_sanciones retoma processing de más de 10 min, alert y skipped_incomplete.
+ * Un applied es inmutable. actualizar_cierre_sanciones valida el lease con p_claimed_at.
  */
+
+/** La 044 retoma un processing cuyo processed_at tiene más de 10 minutos. */
+export const MINUTOS_LEASE_044 = 10;
 /** Estados que el CHECK de la 043 acepta hoy. `processing` no está. */
 export const ESTADOS_CIERRE_043 = ['applied', 'skipped_incomplete', 'alert'] as const;
 

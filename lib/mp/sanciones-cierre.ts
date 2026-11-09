@@ -14,6 +14,7 @@ import {
   estadoPagos,
   fechaSancion,
   inicioPartido,
+  type ActualizacionCierre,
   type CierreSancionFila,
   type CierreSancionSnapshot,
   type CierreSnapshotItem,
@@ -37,9 +38,6 @@ export const SANCIONES_AL_CIERRE_DESDE_DEFECTO = '2026-11-09';
 
 /** Tope por pasada, para no encadenar búsquedas de Mercado Pago en un solo tick. */
 export const TOPE_POR_CRON = 3;
-
-/** Un processing más viejo que esto lo retoma el cron (la corrida anterior murió). */
-export const MINUTOS_REINTENTO_PROCESSING = 10;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -249,21 +247,20 @@ function sancionadosDe(items: CierreSancionSnapshot | undefined): NonNullable<Re
   }));
 }
 
-function processingViejo(processedAt: string, ahora: Date): boolean {
-  const t = Date.parse(processedAt);
-  if (Number.isNaN(t)) return true;
-  return ahora.getTime() - t >= MINUTOS_REINTENTO_PROCESSING * 60 * 1000;
-}
-
 function notaIncompleta(sanciones: number, deudas: number): string {
   return `Escritura incompleta: quedaron ${sanciones} sanciones y ${deudas} deudas. Se puede reintentar.`;
 }
 
+function pararLease(matchId: string): ResultadoCierreSancion {
+  console.error('[sanciones-cierre]', matchId, 'lease');
+  return { ok: true, status: 'processing', note: 'Otro proceso retomó el cierre.', sancionados: [] };
+}
+
 /**
- * Aplica (o deja alerta) las sanciones de un partido ya cerrado.
- * El reclamo es `processing` (no final). `applied` se escribe solo cuando
- * todas las sanciones y deudas terminaron. Si creada es false y otro
- * proceso sigue en curso, el cron no escribe; el botón sí puede completar.
+ * Aplica las sanciones de un partido ya cerrado.
+ * Siempre reclama con status processing (044) si la fila no está applied.
+ * creada false (en_curso o applied): no escribe sanciones ni deudas.
+ * El processed_at del reclamo ganado es el lease de actualizar_cierre_sanciones.
  */
 export async function aplicarSancionesCierre(
   deps: Deps,
@@ -313,51 +310,62 @@ export async function aplicarSancionesCierre(
   if (plan.status === 'sin_cierre') throw new ErrorPagos('el partido todavía no se cierra', 409);
 
   const processed_by = procesadoPor(actor);
-  const processed_at = deps.ahora().toISOString();
   const snapshot = plan.snapshot;
-
-  if (!previa) {
-    const reclamo = await deps.repo.reclamarCierre({
-      match_id: matchId, group_id: groupId, processed_by, snapshot,
-      status: 'processing', note: 'Cierre en curso.',
-    });
-    const ahoraFila = await deps.repo.cierreSancion(matchId);
-    if (!reclamo.creada) {
-      if (ahoraFila?.status === 'applied') {
-        return {
-          ok: true, ya_aplicado: true, status: 'applied', applies_to: plan.fechaSancion,
-          note: ahoraFila.note, sancionados: sancionadosDe(ahoraFila.snapshot),
-        };
-      }
-      if (!ahoraFila) return { ok: true, ya_aplicado: true, applies_to: plan.fechaSancion, sancionados: [] };
-      if (actor.via === 'cron' && ahoraFila.status === 'processing' && !processingViejo(ahoraFila.processed_at, deps.ahora())) {
-        return { ok: true, status: 'processing', note: ahoraFila.note, applies_to: plan.fechaSancion, sancionados: [] };
-      }
+  const reclamo = await deps.repo.reclamarCierre({
+    match_id: matchId, group_id: groupId, processed_by, snapshot,
+    status: 'processing', note: 'Cierre en curso.',
+  });
+  if (!reclamo.creada) {
+    if (reclamo.motivo === 'applied' || reclamo.status === 'applied') {
+      const vigente = await deps.repo.cierreSancion(matchId);
+      return {
+        ok: true, ya_aplicado: true, status: 'applied', applies_to: plan.fechaSancion,
+        note: vigente?.note ?? null, sancionados: sancionadosDe(vigente?.snapshot),
+      };
     }
+    return { ok: true, status: 'processing', note: 'Cierre en curso.', applies_to: plan.fechaSancion, sancionados: [] };
   }
+  const claimedAt = reclamo.processed_at;
+  if (!claimedAt) throw new ErrorPagos('el reclamo no trajo processed_at', 503);
 
   if (plan.status !== 'applied') {
     const guardada = await deps.repo.guardarCierreSancion({
-      match_id: matchId, group_id: groupId, processed_at, processed_by,
+      match_id: matchId, group_id: groupId, processed_by,
       status: plan.status, note: plan.note, snapshot,
-    });
-    return { ok: true, status: guardada.status, note: guardada.note, applies_to: plan.fechaSancion, sancionados: [] };
+    }, { claimedAt });
+    if (guardada.motivo === 'lease') return pararLease(matchId);
+    if (guardada.motivo === 'applied') {
+      return {
+        ok: true, ya_aplicado: true, status: 'applied', applies_to: plan.fechaSancion,
+        note: guardada.fila?.note ?? null, sancionados: sancionadosDe(guardada.fila?.snapshot),
+      };
+    }
+    return { ok: true, status: guardada.fila?.status ?? plan.status, note: guardada.fila?.note ?? plan.note, applies_to: plan.fechaSancion, sancionados: [] };
   }
 
   const progreso = { sanciones: 0, deudas: 0 };
   try {
     const sancionados = await escribirSanciones(deps, groupId, matchId, plan, actor, progreso);
-    const cerrado = await cerrarNota(deps, groupId, matchId, plan, processed_by, processed_at, sancionados, snapshot);
-    return { ok: true, ya_aplicado: false, status: 'applied', applies_to: plan.fechaSancion, note: cerrado.note, sancionados };
+    const cerrado = await cerrarNota(deps, groupId, matchId, plan, processed_by, claimedAt, sancionados, snapshot);
+    if (cerrado.motivo === 'lease') return pararLease(matchId);
+    if (cerrado.motivo === 'applied') {
+      return {
+        ok: true, ya_aplicado: true, status: 'applied', applies_to: plan.fechaSancion,
+        note: cerrado.fila?.note ?? null, sancionados: sancionadosDe(cerrado.fila?.snapshot),
+      };
+    }
+    return { ok: true, ya_aplicado: false, status: 'applied', applies_to: plan.fechaSancion, note: cerrado.fila?.note ?? null, sancionados };
   } catch (e) {
     const note = notaIncompleta(progreso.sanciones, progreso.deudas);
     try {
-      await deps.repo.guardarCierreSancion({
-        match_id: matchId, group_id: groupId, processed_at, processed_by,
+      const alerta = await deps.repo.guardarCierreSancion({
+        match_id: matchId, group_id: groupId, processed_by,
         status: 'alert', snapshot, note,
-      }, { forzar: true });
-    } catch (alerta) {
-      console.error('[sanciones-cierre]', matchId, 'alert', alerta instanceof ErrorPagos ? alerta.status : (alerta as { code?: string })?.code || 'error');
+      }, { claimedAt });
+      if (alerta.motivo === 'lease') console.error('[sanciones-cierre]', matchId, 'lease');
+      if (alerta.motivo === 'applied') console.error('[sanciones-cierre]', matchId, 'applied');
+    } catch (errorAlerta) {
+      console.error('[sanciones-cierre]', matchId, 'alert', errorAlerta instanceof ErrorPagos ? errorAlerta.status : (errorAlerta as { code?: string })?.code || 'error');
     }
     console.error('[sanciones-cierre]', matchId, e instanceof ErrorPagos ? e.status : (e as { code?: string })?.code || 'error');
     throw e;
@@ -431,10 +439,10 @@ async function cerrarNota(
   matchId: string,
   plan: PlanCierre,
   processed_by: string,
-  processed_at: string,
+  claimedAt: string,
   sancionados: NonNullable<ResultadoCierreSancion['sancionados']>,
   base: CierreSancionSnapshot,
-) {
+): Promise<ActualizacionCierre> {
   let note = plan.note || '';
   const pisadas = plan.sancionables.filter((s) => !sancionados.some((x) => x.user_id === s.user_id));
   if (pisadas.length) {
@@ -452,9 +460,9 @@ async function cerrarNota(
     return { ...item, sancion: true, deuda: hecho.deuda };
   }));
   return deps.repo.guardarCierreSancion({
-    match_id: matchId, group_id: groupId, processed_at, processed_by,
+    match_id: matchId, group_id: groupId, processed_by,
     status: 'applied', note, snapshot,
-  });
+  }, { claimedAt });
 }
 
 export interface ResultadoCron {
@@ -471,8 +479,7 @@ export async function correrSancionesCierre(deps: Deps, ahora = new Date()): Pro
   for (const groupId of SANCION_DEUDA_GRUPOS) {
     let pendientes: { id: string; cerrado_en: string }[] = [];
     try {
-      const reintento = new Date(ahora.getTime() - MINUTOS_REINTENTO_PROCESSING * 60 * 1000).toISOString();
-      pendientes = await deps.repo.partidosPendientesCierre(groupId, desde, TOPE_POR_CRON, reintento);
+      pendientes = await deps.repo.partidosPendientesCierre(groupId, desde, TOPE_POR_CRON);
     } catch (e) {
       console.error('[cron/sanciones-cierre]', groupId, e instanceof ErrorPagos ? e.status : (e as { code?: string })?.code || 'error');
       continue;
