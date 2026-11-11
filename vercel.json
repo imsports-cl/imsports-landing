@@ -2,22 +2,55 @@
   "buildCommand": "",
   "outputDirectory": ".",
   "cleanUrls": true,
+  "redirects": [],
   "rewrites": [
-    { "source": "/join/:code", "destination": "/join.html" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/join/:code",
+      "destination": "/join.html"
+    },
+    {
+      "source": "/match/:id/share",
+      "destination": "/match-share.html"
+    },
+    {
+      "source": "/email/unsubscribe",
+      "destination": "/unsubscribe.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {
       "source": "/.well-known/apple-app-site-association",
       "headers": [
-        { "key": "Content-Type", "value": "application/json" }
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "source": "/.well-known/assetlinks.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
       ]
     },
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" }
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
       ]
     }
   ]

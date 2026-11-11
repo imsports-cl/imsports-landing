@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es-CL">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Baja de correo — IM SPORTS</title>
+  <meta name="robots" content="noindex">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0A0A0A; color: #fff; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      background: #1C1C1E; border-radius: 24px; padding: 48px 32px;
+      max-width: 420px; width: 100%; text-align: center;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .logo { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 28px; }
+    .logo-icon { background: #00E676; color: #0A0A0A; font-weight: 800; font-size: 18px; padding: 6px 10px; border-radius: 8px; }
+    .logo-word { font-weight: 800; font-size: 22px; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    p { color: #A0A0A0; line-height: 1.55; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo"><span class="logo-icon">IM</span><span class="logo-word">SPORTS</span></div>
+    <h1 id="title">Procesando tu baja…</h1>
+    <p id="body">Un segundo.</p>
+  </div>
+  <script>
+    (function () {
+      var title = document.getElementById('title');
+      var body = document.getElementById('body');
+      var token = new URLSearchParams(location.search).get('token') || '';
+      if (!token) {
+        title.textContent = 'El enlace no es válido';
+        body.textContent = 'Falta el token de baja. Abre el enlace que llegó en el correo.';
+        return;
+      }
+      var url = 'https://whxufmuakpmuyiatfttr.supabase.co/functions/v1/email-unsubscribe?token=' + encodeURIComponent(token);
+      fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } })
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (result) {
+          if (result.ok && result.data && result.data.ok) {
+            title.textContent = 'Listo, te das de baja';
+            body.textContent = 'Ya no te vamos a mandar este tipo de correo. El resto de tus avisos no cambia. Puedes volver a activarlos en Ajustes, en la app.';
+          } else {
+            title.textContent = 'El enlace no es válido';
+            body.textContent = 'El enlace de baja es inválido o ya venció.';
+          }
+        })
+        .catch(function () {
+          title.textContent = 'No se pudo completar';
+          body.textContent = 'Inténtalo más tarde o entra a Ajustes en la app.';
+        });
+    })();
+  </script>
+</body>
+</html>
