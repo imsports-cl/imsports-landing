@@ -3,7 +3,8 @@
  *
  * Solo muestra una página de confirmación. No da de baja.
  * El botón hace POST a la edge email-unsubscribe (ver docs/EMAIL-UNSUBSCRIBE-CONTRACT.md).
- * Tras un POST exitoso, la edge redirige aquí con ?status=ok (o error).
+ * Tras un POST, la edge redirige aquí con ?status=ok (baja nueva),
+ * ?status=used (el enlace ya se había usado) o ?status=error.
  */
 import type { Metadata } from 'next';
 
@@ -33,6 +34,10 @@ export default function UnsubscribePage({ searchParams }: Props) {
   if (status === 'ok') {
     title = 'Listo, te das de baja';
     body = 'Ya no te vamos a mandar este tipo de correo. El resto de tus avisos no cambia. Puedes volver a activarlos en Ajustes, en la app.';
+    showForm = false;
+  } else if (status === 'used') {
+    title = 'Este enlace ya fue usado';
+    body = 'Este enlace ya fue usado. Si quieres darte de baja otra vez, usa el link del próximo correo o entra a Ajustes.';
     showForm = false;
   } else if (status === 'error') {
     title = 'No se pudo completar';
