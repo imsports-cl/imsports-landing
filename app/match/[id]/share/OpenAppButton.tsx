@@ -3,7 +3,13 @@
 import { useEffect } from 'react';
 
 function safeSegment(value: string): string {
-  return encodeURIComponent(value);
+  // Next puede entregar el segmento todavía encodeado; decode + encode
+  // una vez evita %22 → %2522. Un UUID no cambia.
+  try {
+    return encodeURIComponent(decodeURIComponent(value));
+  } catch {
+    return encodeURIComponent(value);
+  }
 }
 
 export default function OpenAppButton({ matchId, card }: { matchId: string; card: string }) {
