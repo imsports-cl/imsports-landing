@@ -7,7 +7,7 @@ import { createClient, type AuthError } from '@supabase/supabase-js';
  * Recuperar contraseña en imsports.app/recuperar. Acepta tres entradas:
  *  1. ?token_hash=…&type=recovery  (plantilla nueva). El token se verifica recién
  *     cuando la persona toca «Continuar»: un escáner que solo abre la página no lo gasta.
- *  2. Correo + código de 6 dígitos ({{ .Token }} del correo).
+ *  2. Correo + código del correo ({{ .Token }}; este proyecto usa 8 dígitos, aceptamos 6 a 10).
  *  3. #access_token=…&refresh_token=…&type=recovery (link estándar de Supabase / flujo implícito).
  * Después de leer la URL la limpiamos con history.replaceState para que el token no
  * quede en el historial ni en el Referer. La página es noindex y no tiene analytics.
@@ -24,6 +24,9 @@ const SUPABASE_ANON_KEY =
 
 // Mínimo de Supabase Auth en este proyecto (por defecto 6; la app usa el mismo).
 const MIN_PASSWORD = 6;
+// Largo del código OTP de Supabase (mailer_otp_length, 6 a 10; hoy el correo trae 8).
+const OTP_MIN = 6;
+const OTP_MAX = 10;
 
 type Mode = 'loading' | 'link' | 'implicit' | 'code' | 'password' | 'done';
 
@@ -43,7 +46,7 @@ function mensajeError(err: AuthError | null, contexto: 'verify' | 'save'): strin
     }
     return 'No pudimos guardar la contraseña. Revisa tu conexión e inténtalo de nuevo.';
   }
-  return 'El enlace o el código ya se usó o venció. Pide un nuevo correo desde la app (Olvidé mi contraseña) y usa solo el último que te llegue, o ingresa el código de 6 dígitos de ese correo.';
+  return 'El enlace o el código ya se usó o venció. Pide un nuevo correo desde la app (Olvidé mi contraseña) y usa solo el último que te llegue, o ingresa el código numérico de ese correo.';
 }
 
 export default function RecuperarForm() {
@@ -146,7 +149,8 @@ export default function RecuperarForm() {
     setMode('done');
   };
 
-  const codigoListo = email.includes('@') && code.replace(/\D/g, '').length === 6;
+  const largoCodigo = code.replace(/\D/g, '').length;
+  const codigoListo = email.includes('@') && largoCodigo >= OTP_MIN && largoCodigo <= OTP_MAX;
 
   return (
     <main style={s.main}>
@@ -186,7 +190,7 @@ export default function RecuperarForm() {
             }}
           >
             <h1 style={s.h1}>Recupera tu contraseña</h1>
-            <p style={s.p}>Escribe tu correo y el código de 6 dígitos que te enviamos.</p>
+            <p style={s.p}>Escribe tu correo y el código numérico que te enviamos.</p>
             <label style={s.label} htmlFor="email">Correo</label>
             <input
               id="email"
@@ -204,10 +208,10 @@ export default function RecuperarForm() {
               style={{ ...s.input, ...s.codeInput }}
               inputMode="numeric"
               autoComplete="one-time-code"
-              placeholder="123456"
-              maxLength={6}
+              placeholder="12345678"
+              maxLength={OTP_MAX}
               value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, OTP_MAX))}
             />
             <button type="submit" style={s.btn} disabled={busy || !codigoListo}>
               {busy ? 'Verificando…' : 'Continuar'}
@@ -315,7 +319,7 @@ const s: Record<string, React.CSSProperties> = {
     background: '#fff',
     color: '#111',
   },
-  codeInput: { letterSpacing: 8, fontSize: 22, textAlign: 'center', fontFamily: "'Courier New', monospace" },
+  codeInput: { letterSpacing: 6, fontSize: 22, textAlign: 'center', fontFamily: "'Courier New', monospace" },
   btn: {
     display: 'block',
     width: '100%',
